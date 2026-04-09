@@ -1,6 +1,7 @@
 class TripSession {
   const TripSession({
     required this.tripId,
+    required this.vehicleType,
     required this.startSoc,
     required this.payloadKg,
     required this.startTimeUtc,
@@ -10,6 +11,7 @@ class TripSession {
   });
 
   final String tripId;
+  final String vehicleType;
   final int startSoc;
   final double payloadKg;
   final DateTime startTimeUtc;
@@ -20,6 +22,7 @@ class TripSession {
   Map<String, dynamic> toJson() {
     return <String, dynamic>{
       'tripId': tripId,
+      'vehicleType': vehicleType,
       'startSoc': startSoc,
       'payloadKg': payloadKg,
       'startTimeUtc': startTimeUtc.toIso8601String(),
@@ -32,6 +35,7 @@ class TripSession {
   factory TripSession.fromJson(Map<String, dynamic> json) {
     return TripSession(
       tripId: json['tripId'] as String,
+      vehicleType: (json['vehicleType'] as String?) ?? 'Electric Vehicle',
       startSoc: json['startSoc'] as int,
       payloadKg: (json['payloadKg'] as num).toDouble(),
       startTimeUtc: DateTime.parse(json['startTimeUtc'] as String).toUtc(),

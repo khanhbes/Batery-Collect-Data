@@ -17,10 +17,14 @@ double _bgLastSpeedMps = 0;
 double _bgDistanceKm = 0;
 int _bgSampleCount = 0;
 Map<String, dynamic>? _bgTrip;
+bool _bgFirstFixEmitted = false;
 
 const String _eventTick = 'telemetry.tick';
 const String _eventError = 'telemetry.error';
 const String _eventStopped = 'telemetry.stopped';
+const String _eventDebug = 'telemetry.debug';
+const String _eventStatus = 'telemetry.status';
+const String _eventStarted = 'telemetry.started';
 
 Future<void> _appendCsvLine(String filePath, List<dynamic> row) async {
   final File file = File(filePath);
@@ -53,6 +57,7 @@ Map<String, dynamic>? _buildTickPayload({
     'payload_kg': trip['payload_kg'],
     'ambient_temp_c': trip['ambient_temp_c'],
     'weather_condition': trip['weather_condition'],
+    'vehicle_type': trip['vehicle_type'],
     'sample_count': _bgSampleCount,
     'elapsed_sec': max(0, now.difference(startUtc).inSeconds),
     'distance_km': _bgDistanceKm,
@@ -61,6 +66,13 @@ Map<String, dynamic>? _buildTickPayload({
 
 void _emitError(ServiceInstance service, Object error) {
   service.invoke(_eventError, <String, dynamic>{'message': error.toString()});
+}
+
+void _emitDebug(ServiceInstance service, String message) {
+  service.invoke(_eventDebug, <String, dynamic>{
+    'message': message,
+    'timestamp': DateTime.now().toUtc().toIso8601String(),
+  });
 }
 
 Future<void> _stopTripInternals(ServiceInstance service) async {
@@ -85,6 +97,10 @@ Future<void> _stopTripInternals(ServiceInstance service) async {
     'sample_count': _bgSampleCount,
     'distance_km': _bgDistanceKm,
   });
+  _emitDebug(
+    service,
+    'Trip stopped: samples=$_bgSampleCount distance=${_bgDistanceKm.toStringAsFixed(3)} km',
+  );
 
   _bgTrip = null;
   _bgDistanceKm = 0;
@@ -100,6 +116,7 @@ Future<void> _startTripInternals(
   _bgSampleCount = 0;
   _bgLastSpeedMps = 0;
   _bgPrevDistancePosition = null;
+  _bgFirstFixEmitted = false;
 
   if (service is AndroidServiceInstance) {
     service.setAsForegroundService();
@@ -108,16 +125,15 @@ Future<void> _startTripInternals(
       content: 'Tracking trip ${trip['trip_id']}',
     );
   }
-
-  try {
-    _bgLatestPosition = await Geolocator.getCurrentPosition(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.bestForNavigation,
-      ),
-    );
-  } catch (_) {
-    _bgLatestPosition = null;
-  }
+  _emitDebug(
+    service,
+    'Trip started: id=${trip['trip_id']} vehicle=${trip['vehicle_type']}',
+  );
+  _emitDebug(service, 'phase=start_received');
+  service.invoke(_eventStarted, <String, dynamic>{
+    'trip_id': trip['trip_id'],
+    'received_at_utc': DateTime.now().toUtc().toIso8601String(),
+  });
 
   await _bgPositionSub?.cancel();
   _bgPositionSub =
@@ -126,21 +142,40 @@ Future<void> _startTripInternals(
           accuracy: LocationAccuracy.bestForNavigation,
           distanceFilter: 0,
         ),
-      ).listen((Position position) {
-        final Position? prev = _bgPrevDistancePosition;
-        if (prev != null) {
-          _bgDistanceKm +=
-              Geolocator.distanceBetween(
-                prev.latitude,
-                prev.longitude,
-                position.latitude,
-                position.longitude,
-              ) /
-              1000;
-        }
-        _bgPrevDistancePosition = position;
+      ).listen(
+        (Position position) {
+          if (!_bgFirstFixEmitted) {
+            _bgFirstFixEmitted = true;
+            _emitDebug(service, 'phase=first_fix');
+          }
+          final Position? prev = _bgPrevDistancePosition;
+          if (prev != null) {
+            _bgDistanceKm +=
+                Geolocator.distanceBetween(
+                  prev.latitude,
+                  prev.longitude,
+                  position.latitude,
+                  position.longitude,
+                ) /
+                1000;
+          }
+          _bgPrevDistancePosition = position;
+          _bgLatestPosition = position;
+        },
+        onError: (Object error) {
+          _emitError(service, error);
+          _emitDebug(service, 'phase=stream_error $error');
+        },
+      );
+  _emitDebug(service, 'phase=stream_attached');
+
+  unawaited(
+    Geolocator.getLastKnownPosition().then((Position? position) {
+      if (position != null && _bgLatestPosition == null) {
         _bgLatestPosition = position;
-      });
+      }
+    }),
+  );
 
   _bgTickTimer?.cancel();
   _bgTickTimer = Timer.periodic(const Duration(seconds: 1), (_) async {
@@ -183,6 +218,12 @@ Future<void> _startTripInternals(
         payload['weather_condition'],
       ]);
       service.invoke(_eventTick, payload);
+      if (_bgSampleCount % 20 == 0) {
+        _emitDebug(
+          service,
+          'Tick sample=$_bgSampleCount speed=${(payload['speed_kmh'] as num).toStringAsFixed(1)} km/h',
+        );
+      }
     } catch (error) {
       _emitError(service, error);
     }
@@ -200,6 +241,7 @@ Future<void> backgroundServiceEntryPoint(ServiceInstance service) async {
       content: 'Background service ready',
     );
   }
+  _emitDebug(service, 'Background service ready');
 
   service.on('trip.start').listen((dynamic payload) async {
     try {
@@ -230,11 +272,43 @@ Future<void> backgroundServiceEntryPoint(ServiceInstance service) async {
     );
     if (payload != null) {
       service.invoke(_eventTick, payload);
+      _emitDebug(service, 'Trip state synced');
     }
   });
 
   service.on('stopService').listen((_) {
     service.stopSelf();
+  });
+
+  service.on('trip.status').listen((_) {
+    service.invoke(_eventStatus, <String, dynamic>{
+      'trip_active': _bgTrip != null,
+      'trip_id': _bgTrip?['trip_id'],
+    });
+  });
+
+  service.on('trip.update_meta').listen((dynamic payload) {
+    try {
+      final Map<String, dynamic> map = Map<String, dynamic>.from(
+        payload as Map,
+      );
+      if (_bgTrip == null) {
+        return;
+      }
+      if (map['trip_id'] != _bgTrip?['trip_id']) {
+        return;
+      }
+
+      if (map.containsKey('weather_condition')) {
+        _bgTrip!['weather_condition'] = map['weather_condition'];
+      }
+      if (map.containsKey('ambient_temp_c')) {
+        _bgTrip!['ambient_temp_c'] = map['ambient_temp_c'];
+      }
+      _emitDebug(service, 'Trip metadata updated');
+    } catch (error) {
+      _emitError(service, error);
+    }
   });
 }
 
@@ -301,6 +375,8 @@ class BackgroundTrackingService {
         _eventTick,
         _eventError,
         _eventStopped,
+        _eventDebug,
+        _eventStarted,
       ]) {
         subscriptions.add(
           _service.on(key).listen((dynamic event) {
@@ -323,14 +399,47 @@ class BackgroundTrackingService {
 
   Future<void> startTrip(TripSession session) async {
     await _ensureServiceRunning();
+
+    final Completer<void> started = Completer<void>();
+    late final StreamSubscription<dynamic> sub;
+    sub = _service.on(_eventStarted).listen((dynamic event) async {
+      final Map<String, dynamic> payload = Map<String, dynamic>.from(
+        (event ?? <String, dynamic>{}) as Map,
+      );
+      if (payload['trip_id'] == session.tripId && !started.isCompleted) {
+        started.complete();
+      }
+      await sub.cancel();
+    });
+
     _service.invoke('trip.start', <String, dynamic>{
       'trip_id': session.tripId,
       'start_soc': session.startSoc,
       'payload_kg': session.payloadKg,
       'ambient_temp_c': session.ambientTempC,
       'weather_condition': session.weatherCondition,
+      'vehicle_type': session.vehicleType,
       'temp_csv_path': session.tempCsvPath,
       'start_time_utc': session.startTimeUtc.toIso8601String(),
+    });
+
+    try {
+      await started.future.timeout(const Duration(seconds: 4));
+    } on TimeoutException {
+      await sub.cancel();
+    }
+  }
+
+  Future<void> updateTripMetadata({
+    required String tripId,
+    required String weatherCondition,
+    required double? ambientTempC,
+  }) async {
+    await _ensureServiceRunning();
+    _service.invoke('trip.update_meta', <String, dynamic>{
+      'trip_id': tripId,
+      'weather_condition': weatherCondition,
+      'ambient_temp_c': ambientTempC,
     });
   }
 
@@ -367,6 +476,51 @@ class BackgroundTrackingService {
   Future<void> syncTripState() async {
     await _ensureServiceRunning();
     _service.invoke('trip.sync');
+  }
+
+  /// Returns true if the background service process is running.
+  Future<bool> isServiceRunning() async {
+    if (!_isSupportedPlatform) return false;
+    return _service.isRunning();
+  }
+
+  /// Returns true if the background isolate has an active trip loaded.
+  /// Queries the isolate directly; times out after 3 s → returns false.
+  Future<bool> isTripActive() async {
+    if (!_isSupportedPlatform) return false;
+    final bool running = await _service.isRunning();
+    if (!running) return false;
+
+    final Completer<bool> completer = Completer<bool>();
+    late final StreamSubscription<dynamic> sub;
+    sub = _service.on(_eventStatus).listen((dynamic event) async {
+      final Map<String, dynamic> payload = Map<String, dynamic>.from(
+        (event ?? <String, dynamic>{}) as Map,
+      );
+      if (!completer.isCompleted) {
+        completer.complete((payload['trip_active'] as bool?) == true);
+      }
+      await sub.cancel();
+    });
+    _service.invoke('trip.status');
+    return completer.future.timeout(
+      const Duration(seconds: 3),
+      onTimeout: () async {
+        await sub.cancel();
+        return false;
+      },
+    );
+  }
+
+  /// Ensures the background service is running and tracking [session].
+  /// If the isolate has lost the trip (e.g. process was killed), re-sends
+  /// the full trip.start command instead of only syncing.
+  Future<void> ensureTripRunning(TripSession session) async {
+    await _ensureServiceRunning();
+    final bool active = await isTripActive();
+    if (!active) {
+      await startTrip(session);
+    }
   }
 
   Future<void> stopService() async {

@@ -1,5 +1,4 @@
 import 'package:geolocator/geolocator.dart';
-import 'package:permission_handler/permission_handler.dart';
 
 class LocationService {
   Future<void> ensurePermissions() async {
@@ -13,13 +12,17 @@ class LocationService {
       permission = await Geolocator.requestPermission();
     }
 
-    if (permission == LocationPermission.denied ||
-        permission == LocationPermission.deniedForever) {
-      throw Exception('Location permission denied.');
+    if (permission == LocationPermission.denied) {
+      throw Exception(
+        'Location permission denied. Please grant location access.',
+      );
     }
 
-    await Permission.locationWhenInUse.request();
-    await Permission.locationAlways.request();
+    if (permission == LocationPermission.deniedForever) {
+      throw Exception(
+        'Location permission denied forever. Please enable it in app settings.',
+      );
+    }
   }
 
   Future<Position> getCurrentPosition() {
@@ -37,5 +40,19 @@ class LocationService {
         distanceFilter: 0,
       ),
     );
+  }
+
+  Future<Position?> getCurrentPositionWithFallback({
+    Duration timeout = const Duration(seconds: 5),
+  }) async {
+    try {
+      return await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.bestForNavigation,
+        ),
+      ).timeout(timeout);
+    } catch (_) {
+      return Geolocator.getLastKnownPosition();
+    }
   }
 }

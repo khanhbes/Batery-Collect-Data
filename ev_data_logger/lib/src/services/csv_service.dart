@@ -1,8 +1,8 @@
 import 'dart:io';
-import 'dart:convert';
 
 import 'package:path_provider/path_provider.dart';
 
+import '../models/trip_history_item.dart';
 import '../models/telemetry_sample.dart';
 
 class CsvService {
@@ -10,7 +10,7 @@ class CsvService {
 
   final Directory? _baseDirectory;
 
-  static const List<String> header = <String>[
+  static const List<String> sampleHeader = <String>[
     'timestamp',
     'trip_id',
     'latitude',
@@ -24,6 +24,8 @@ class CsvService {
     'ambient_temp_c',
     'weather_condition',
   ];
+
+  static const List<String> summaryHeader = TripHistoryItem.masterHeader;
 
   Future<Directory> _rootDir() async {
     if (_baseDirectory != null) {
@@ -41,7 +43,7 @@ class CsvService {
 
     final File file = File('${tripsDir.path}/temp_trip_$tripId.csv');
     if (!await file.exists()) {
-      await file.writeAsString('${_toCsvLine(header)}\n');
+      await file.writeAsString('${_toCsvLine(sampleHeader)}\n');
     }
     return file;
   }
@@ -73,53 +75,6 @@ class CsvService {
     ];
   }
 
-  Future<File> finalizeTrip({
-    required String tempCsvPath,
-    required String tripId,
-    required int startSoc,
-    required int endSoc,
-  }) async {
-    final File tempFile = File(tempCsvPath);
-    if (!await tempFile.exists()) {
-      throw Exception('Temp CSV file not found: $tempCsvPath');
-    }
-
-    final Directory root = await _rootDir();
-    final Directory tripsDir = Directory('${root.path}/trips');
-    if (!await tripsDir.exists()) {
-      await tripsDir.create(recursive: true);
-    }
-
-    final File finalFile = File('${tripsDir.path}/trip_$tripId.csv');
-    final IOSink sink = finalFile.openWrite(mode: FileMode.write);
-    sink.writeln(_toCsvLine(header));
-
-    await for (final String line
-        in tempFile
-            .openRead()
-            .transform(utf8.decoder)
-            .transform(const LineSplitter())) {
-      final String trimmed = line.trim();
-      if (trimmed.isEmpty || trimmed == _toCsvLine(header)) {
-        continue;
-      }
-
-      final List<String> row = trimmed.split(',');
-      if (row.length < header.length) {
-        continue;
-      }
-
-      row[7] = '$startSoc';
-      row[8] = '$endSoc';
-      sink.writeln(_toCsvLine(row));
-    }
-
-    await sink.flush();
-    await sink.close();
-
-    return finalFile;
-  }
-
   Future<File> getMasterFile() async {
     final Directory root = await _rootDir();
     final Directory tripsDir = Directory('${root.path}/trips');
@@ -129,30 +84,25 @@ class CsvService {
 
     final File masterFile = File('${tripsDir.path}/trips_master.csv');
     if (!await masterFile.exists()) {
-      await masterFile.writeAsString('${_toCsvLine(header)}\n');
+      await masterFile.writeAsString('${_toCsvLine(summaryHeader)}\n');
     }
     return masterFile;
   }
 
-  Future<File> appendTripToMaster(File tripCsvFile) async {
+  Future<File> appendTripSummary(TripHistoryItem summary) async {
     final File master = await getMasterFile();
-    final IOSink sink = master.openWrite(mode: FileMode.append);
-
-    await for (final String line
-        in tripCsvFile
-            .openRead()
-            .transform(utf8.decoder)
-            .transform(const LineSplitter())) {
-      final String trimmed = line.trim();
-      if (trimmed.isEmpty || trimmed == _toCsvLine(header)) {
-        continue;
-      }
-      sink.writeln(trimmed);
-    }
-
-    await sink.flush();
-    await sink.close();
+    await master.writeAsString(
+      '${_toCsvLine(summary.toMasterCsvRow())}\n',
+      mode: FileMode.append,
+    );
     return master;
+  }
+
+  Future<void> deleteTempFile(String tempCsvPath) async {
+    final File file = File(tempCsvPath);
+    if (await file.exists()) {
+      await file.delete();
+    }
   }
 
   String _toCsvLine(List<dynamic> row) {

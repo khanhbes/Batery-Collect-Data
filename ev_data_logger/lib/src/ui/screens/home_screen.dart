@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../config/app_info.dart';
 import '../../controllers/trip_providers.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
@@ -16,6 +17,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
   final TextEditingController _startSocController = TextEditingController();
   final TextEditingController _payloadKgController = TextEditingController();
+  bool _isStarting = false;
 
   @override
   void dispose() {
@@ -73,13 +75,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 return null;
               },
             ),
+            const SizedBox(height: 12),
+            InputDecorator(
+              decoration: const InputDecoration(
+                labelText: 'Vehicle Type',
+                border: OutlineInputBorder(),
+              ),
+              child: const Text(evVehicleType),
+            ),
             const SizedBox(height: 20),
             SizedBox(
               width: double.infinity,
               child: FilledButton.icon(
                 icon: const Icon(Icons.play_arrow),
-                label: const Text('Start Trip'),
-                onPressed: state.isTracking
+                label: Text(_isStarting ? 'Starting...' : 'Start Trip'),
+                onPressed: state.isTracking || _isStarting
                     ? null
                     : () async {
                         if (_formKey.currentState?.validate() != true) {
@@ -93,14 +103,39 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                           _payloadKgController.text,
                         );
 
-                        await ref
-                            .read(tripControllerProvider.notifier)
-                            .startTrip(
-                              startSoc: startSoc,
-                              payloadKg: payloadKg,
-                            );
+                        setState(() {
+                          _isStarting = true;
+                        });
 
-                        widget.onTripStarted?.call();
+                        try {
+                          await ref
+                              .read(tripControllerProvider.notifier)
+                              .startTrip(
+                                startSoc: startSoc,
+                                payloadKg: payloadKg,
+                              );
+
+                          if (context.mounted) {
+                            widget.onTripStarted?.call();
+                          }
+                        } catch (error) {
+                          if (!context.mounted) {
+                            return;
+                          }
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                'Unable to start trip: ${error.toString()}',
+                              ),
+                            ),
+                          );
+                        } finally {
+                          if (mounted) {
+                            setState(() {
+                              _isStarting = false;
+                            });
+                          }
+                        }
                       },
               ),
             ),

@@ -11,6 +11,7 @@ class TelemetryLiveSnapshot {
     required this.payloadKg,
     required this.ambientTempC,
     required this.weatherCondition,
+    required this.vehicleType,
     required this.sampleCount,
     required this.elapsedSec,
     required this.distanceKm,
@@ -27,6 +28,7 @@ class TelemetryLiveSnapshot {
   final double payloadKg;
   final double? ambientTempC;
   final String weatherCondition;
+  final String vehicleType;
   final int sampleCount;
   final int elapsedSec;
   final double distanceKm;
@@ -44,6 +46,7 @@ class TelemetryLiveSnapshot {
       payloadKg: (map['payload_kg'] as num).toDouble(),
       ambientTempC: (map['ambient_temp_c'] as num?)?.toDouble(),
       weatherCondition: map['weather_condition'] as String,
+      vehicleType: (map['vehicle_type'] as String?) ?? 'Electric Vehicle',
       sampleCount: map['sample_count'] as int,
       elapsedSec: map['elapsed_sec'] as int,
       distanceKm: (map['distance_km'] as num).toDouble(),

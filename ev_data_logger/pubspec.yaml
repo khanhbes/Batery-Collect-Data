@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.0+3
+version: 1.0.0+4
 environment:
   sdk: ^3.11.0
 
@@ -36,12 +36,10 @@ dependencies:
   flutter_riverpod: ^3.3.1
   geolocator: ^14.0.2
   flutter_background_service: ^5.1.0
-  flutter_background_service_android: ^6.3.1
   csv: ^8.0.0
   path_provider: ^2.1.5
   share_plus: ^12.0.2
   http: ^1.6.0
-  permission_handler: ^12.0.1
   uuid: ^4.5.3
   intl: ^0.20.2
   flutter_svg: ^2.2.4
@@ -70,6 +68,7 @@ flutter:
 
   assets:
     - assets/logo/ev_logger_logo.svg
+    - assets/logo/ev_trip_logger_badge.svg
 
   # To add assets to your application, add an assets section, like this:
   # assets:
@@ -101,5 +100,6 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
 
 

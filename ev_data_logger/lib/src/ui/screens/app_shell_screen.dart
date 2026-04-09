@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../config/app_info.dart';
 import '../../controllers/trip_providers.dart';
 import '../widgets/app_logo.dart';
 import '../widgets/end_trip_dialog.dart';
@@ -106,7 +107,7 @@ class _AppShellScreenState extends ConsumerState<AppShellScreen> {
           children: <Widget>[
             const AppLogo(size: 28),
             const SizedBox(width: 8),
-            Text('EV Data Logger - ${titles[_index]}'),
+            Text('$appDisplayName $appDisplayVersion - ${titles[_index]}'),
           ],
         ),
       ),

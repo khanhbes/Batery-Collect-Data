@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../config/app_info.dart';
 import '../widgets/app_logo.dart';
 import 'app_shell_screen.dart';
 
@@ -79,20 +80,29 @@ class _SplashScreenState extends State<SplashScreen>
             },
             child: Column(
               mainAxisSize: MainAxisSize.min,
-              children: const <Widget>[
-                AppLogo(size: 112),
-                SizedBox(height: 18),
-                Text(
-                  'EV DATA LOGGER',
+              children: <Widget>[
+                const AppLogo(size: 112),
+                const SizedBox(height: 18),
+                const Text(
+                  appDisplayName,
                   style: TextStyle(
                     color: Color(0xFFD5F7E3),
                     fontSize: 26,
-                    letterSpacing: 2,
+                    letterSpacing: 1.5,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
-                SizedBox(height: 8),
+                const SizedBox(height: 6),
                 Text(
+                  appDisplayVersion,
+                  style: const TextStyle(
+                    color: Color(0xFFB9E7CE),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Text(
                   'Track every second. Drive by data.',
                   style: TextStyle(color: Color(0xFFB9E7CE), fontSize: 14),
                 ),

@@ -1,4 +1,5 @@
 import '../models/trip_session.dart';
+import '../models/route_point.dart';
 import '../models/telemetry_live_snapshot.dart';
 
 class TripState {
@@ -10,7 +11,8 @@ class TripState {
     required this.liveSpeedKmh,
     required this.sampleCount,
     required this.latestTelemetry,
-    required this.lastExportedCsvPath,
+    required this.routePoints,
+    required this.debugLogs,
     required this.masterCsvPath,
     required this.errorMessage,
   });
@@ -24,7 +26,8 @@ class TripState {
       liveSpeedKmh: 0,
       sampleCount: 0,
       latestTelemetry: null,
-      lastExportedCsvPath: null,
+      routePoints: <RoutePoint>[],
+      debugLogs: <String>[],
       masterCsvPath: null,
       errorMessage: null,
     );
@@ -37,7 +40,8 @@ class TripState {
   final double liveSpeedKmh;
   final int sampleCount;
   final TelemetryLiveSnapshot? latestTelemetry;
-  final String? lastExportedCsvPath;
+  final List<RoutePoint> routePoints;
+  final List<String> debugLogs;
   final String? masterCsvPath;
   final String? errorMessage;
 
@@ -49,12 +53,14 @@ class TripState {
     double? liveSpeedKmh,
     int? sampleCount,
     TelemetryLiveSnapshot? latestTelemetry,
-    String? lastExportedCsvPath,
+    List<RoutePoint>? routePoints,
+    List<String>? debugLogs,
     String? masterCsvPath,
     String? errorMessage,
     bool clearSession = false,
     bool clearLatestTelemetry = false,
-    bool clearLastExportedCsvPath = false,
+    bool clearRoutePoints = false,
+    bool clearDebugLogs = false,
     bool clearMasterCsvPath = false,
     bool clearErrorMessage = false,
   }) {
@@ -68,9 +74,10 @@ class TripState {
       latestTelemetry: clearLatestTelemetry
           ? null
           : latestTelemetry ?? this.latestTelemetry,
-      lastExportedCsvPath: clearLastExportedCsvPath
-          ? null
-          : lastExportedCsvPath ?? this.lastExportedCsvPath,
+      routePoints: clearRoutePoints
+          ? <RoutePoint>[]
+          : routePoints ?? this.routePoints,
+      debugLogs: clearDebugLogs ? <String>[] : debugLogs ?? this.debugLogs,
       masterCsvPath: clearMasterCsvPath
           ? null
           : masterCsvPath ?? this.masterCsvPath,
