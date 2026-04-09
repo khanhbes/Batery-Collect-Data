@@ -4,23 +4,34 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path_provider/path_provider.dart';
 
 import 'src/config/app_info.dart';
+import 'src/services/storage_path_service.dart';
 import 'src/ui/screens/splash_screen.dart';
 
 /// Appends [message] to `crash_log.txt` in the app documents directory.
 /// Failures are silently swallowed so the error handler itself never throws.
 Future<void> _writeCrashLog(String message) async {
   try {
-    final Directory dir = await getApplicationDocumentsDirectory();
+    final String rootPath = AppStorage.isInitialized
+        ? AppStorage.rootPath
+        : Directory.systemTemp.path;
+    final Directory dir = Directory(rootPath);
+    if (!await dir.exists()) {
+      await dir.create(recursive: true);
+    }
     final File file = File('${dir.path}/crash_log.txt');
     final String stamp = DateTime.now().toUtc().toIso8601String();
     await file.writeAsString('[$stamp] $message\n', mode: FileMode.append);
   } catch (_) {}
 }
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  try {
+    await AppStorage.initialize();
+  } catch (_) {}
+
   // Catch Flutter framework errors (widget build, layout, etc.).
   FlutterError.onError = (FlutterErrorDetails details) {
     FlutterError.presentError(details);

@@ -10,6 +10,7 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   group('CsvService', () {
     test('serialize uses fixed schema order and UTC timestamp', () {
+      final Directory dir = Directory.systemTemp;
       final sample = TelemetrySample(
         timestampUtc: DateTime.parse('2026-01-01T00:00:00Z'),
         tripId: 'trip_1',
@@ -25,7 +26,7 @@ void main() {
         weatherCondition: 'Clouds',
       );
 
-      final row = CsvService().serializeSample(sample);
+      final row = CsvService(baseDirectory: dir).serializeSample(sample);
       expect(row[0], '2026-01-01T00:00:00.000Z');
       expect(row.length, CsvService.sampleHeader.length);
       expect(row[1], 'trip_1');

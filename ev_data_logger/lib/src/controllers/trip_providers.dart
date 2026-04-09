@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'dart:io';
 
 import '../models/trip_history_item.dart';
 import '../services/background_tracking_service.dart';
@@ -7,6 +8,7 @@ import '../services/drive_sync_service.dart';
 import '../services/location_service.dart';
 import '../services/trip_persistence_service.dart';
 import '../services/weather_service.dart';
+import '../services/storage_path_service.dart';
 import 'charging_controller.dart';
 import 'charging_state.dart';
 import 'trip_controller.dart';
@@ -25,11 +27,17 @@ final backgroundServiceProvider = Provider<BackgroundTrackingService>((ref) {
 });
 
 final csvServiceProvider = Provider<CsvService>((ref) {
-  return CsvService();
+  final Directory root = Directory(
+    AppStorage.isInitialized ? AppStorage.rootPath : Directory.systemTemp.path,
+  );
+  return CsvService(baseDirectory: root);
 });
 
 final tripPersistenceServiceProvider = Provider<TripPersistenceService>((ref) {
-  return TripPersistenceService();
+  final Directory root = Directory(
+    AppStorage.isInitialized ? AppStorage.rootPath : Directory.systemTemp.path,
+  );
+  return TripPersistenceService(baseDirectory: root);
 });
 
 final driveSyncServiceProvider = Provider<DriveSyncService>((ref) {

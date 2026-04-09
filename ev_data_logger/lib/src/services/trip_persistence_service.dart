@@ -1,24 +1,19 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:path_provider/path_provider.dart';
-
 import '../models/charging_session_item.dart';
 import '../models/sync_queue_item.dart';
 import '../models/trip_history_item.dart';
 import '../models/trip_session.dart';
 
 class TripPersistenceService {
-  TripPersistenceService({Directory? baseDirectory})
+  TripPersistenceService({required Directory baseDirectory})
     : _baseDirectory = baseDirectory;
 
-  final Directory? _baseDirectory;
+  final Directory _baseDirectory;
 
   Future<Directory> _rootDir() async {
-    if (_baseDirectory != null) {
-      return _baseDirectory;
-    }
-    return getApplicationDocumentsDirectory();
+    return _baseDirectory;
   }
 
   Future<File> _activeTripFile() async {

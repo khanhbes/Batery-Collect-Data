@@ -1,15 +1,13 @@
 import 'dart:io';
 
-import 'package:path_provider/path_provider.dart';
-
 import '../models/charging_session_item.dart';
 import '../models/trip_history_item.dart';
 import '../models/telemetry_sample.dart';
 
 class CsvService {
-  CsvService({Directory? baseDirectory}) : _baseDirectory = baseDirectory;
+  CsvService({required Directory baseDirectory}) : _baseDirectory = baseDirectory;
 
-  final Directory? _baseDirectory;
+  final Directory _baseDirectory;
 
   static const List<String> sampleHeader = <String>[
     'timestamp',
@@ -29,10 +27,7 @@ class CsvService {
   static const List<String> summaryHeader = TripHistoryItem.masterHeader;
 
   Future<Directory> _rootDir() async {
-    if (_baseDirectory != null) {
-      return _baseDirectory;
-    }
-    return getApplicationDocumentsDirectory();
+    return _baseDirectory;
   }
 
   Future<File> createTempFile(String tripId) async {
