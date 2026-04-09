@@ -9,6 +9,8 @@ class TelemetryLiveSnapshot {
     required this.startSoc,
     required this.endSoc,
     required this.payloadKg,
+    required this.effectivePayloadKg,
+    required this.passengerOn,
     required this.ambientTempC,
     required this.weatherCondition,
     required this.vehicleType,
@@ -26,6 +28,8 @@ class TelemetryLiveSnapshot {
   final int startSoc;
   final int? endSoc;
   final double payloadKg;
+  final double effectivePayloadKg;
+  final bool passengerOn;
   final double? ambientTempC;
   final String weatherCondition;
   final String vehicleType;
@@ -44,6 +48,10 @@ class TelemetryLiveSnapshot {
       startSoc: map['start_soc'] as int,
       endSoc: map['end_soc'] as int?,
       payloadKg: (map['payload_kg'] as num).toDouble(),
+        effectivePayloadKg:
+          (map['effective_payload_kg'] as num?)?.toDouble() ??
+          (map['payload_kg'] as num).toDouble(),
+        passengerOn: (map['passenger_on'] as bool?) ?? false,
       ambientTempC: (map['ambient_temp_c'] as num?)?.toDouble(),
       weatherCondition: map['weather_condition'] as String,
       vehicleType: (map['vehicle_type'] as String?) ?? 'Electric Vehicle',

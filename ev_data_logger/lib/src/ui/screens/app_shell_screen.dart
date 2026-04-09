@@ -6,6 +6,7 @@ import '../../controllers/trip_providers.dart';
 import '../widgets/app_logo.dart';
 import '../widgets/end_trip_dialog.dart';
 import 'active_trip_screen.dart';
+import 'charging_screen.dart';
 import 'export_screen.dart';
 import 'home_screen.dart';
 import 'trip_history_screen.dart';
@@ -86,7 +87,7 @@ class _AppShellScreenState extends ConsumerState<AppShellScreen> {
     }
 
     setState(() {
-      _index = 2;
+      _index = 3;
     });
   }
 
@@ -94,12 +95,19 @@ class _AppShellScreenState extends ConsumerState<AppShellScreen> {
   Widget build(BuildContext context) {
     final List<Widget> tabs = <Widget>[
       HomeScreen(onTripStarted: () => setState(() => _index = 1)),
-      ActiveTripScreen(onTripEnded: () => setState(() => _index = 2)),
+      ActiveTripScreen(onTripEnded: () => setState(() => _index = 3)),
+      const ChargingScreen(),
       const TripHistoryScreen(),
       const ExportScreen(),
     ];
 
-    const List<String> titles = <String>['Start', 'Live', 'History', 'Export'];
+    const List<String> titles = <String>[
+      'Start',
+      'Live',
+      'Charging',
+      'History',
+      'Export',
+    ];
 
     return Scaffold(
       appBar: AppBar(
@@ -118,13 +126,14 @@ class _AppShellScreenState extends ConsumerState<AppShellScreen> {
           setState(() {
             _index = value;
           });
-          if (value == 2) {
+          if (value == 3) {
             ref.invalidate(tripHistoryProvider);
           }
         },
         destinations: const <NavigationDestination>[
           NavigationDestination(icon: Icon(Icons.play_circle), label: 'Start'),
           NavigationDestination(icon: Icon(Icons.speed), label: 'Live'),
+          NavigationDestination(icon: Icon(Icons.bolt), label: 'Charging'),
           NavigationDestination(icon: Icon(Icons.history), label: 'History'),
           NavigationDestination(icon: Icon(Icons.file_upload), label: 'Export'),
         ],

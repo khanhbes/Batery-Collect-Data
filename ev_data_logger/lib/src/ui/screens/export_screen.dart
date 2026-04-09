@@ -16,12 +16,15 @@ class ExportScreen extends ConsumerStatefulWidget {
 
 class _ExportScreenState extends ConsumerState<ExportScreen> {
   late Future<String> _masterCsvFuture;
+  late Future<String> _chargingCsvFuture;
   ProviderSubscription<String?>? _masterPathSub;
+  ProviderSubscription<String?>? _chargingPathSub;
 
   @override
   void initState() {
     super.initState();
     _masterCsvFuture = _loadMasterCsvPath();
+    _chargingCsvFuture = _loadChargingCsvPath();
     _masterPathSub = ref.listenManual<String?>(
       tripLiveProvider.select((TripState state) => state.masterCsvPath),
       (String? previous, String? next) {
@@ -31,16 +34,32 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
         _refreshMasterCsvPath();
       },
     );
+    _chargingPathSub = ref.listenManual<String?>(
+      chargingLiveProvider.select(
+        (chargingState) => chargingState.chargingLogCsvPath,
+      ),
+      (String? previous, String? next) {
+        if (previous == next || next == null) {
+          return;
+        }
+        _refreshChargingCsvPath();
+      },
+    );
   }
 
   @override
   void dispose() {
     _masterPathSub?.close();
+    _chargingPathSub?.close();
     super.dispose();
   }
 
   Future<String> _loadMasterCsvPath() {
     return ref.read(tripControllerProvider.notifier).masterCsvPath();
+  }
+
+  Future<String> _loadChargingCsvPath() {
+    return ref.read(chargingControllerProvider.notifier).chargingLogCsvPath();
   }
 
   Future<void> _refreshMasterCsvPath() async {
@@ -52,10 +71,25 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
     });
   }
 
+  Future<void> _refreshChargingCsvPath() async {
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _chargingCsvFuture = _loadChargingCsvPath();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
+    final tripState = ref.watch(tripLiveProvider);
     final String? masterPathFromState = ref.watch(
       tripLiveProvider.select((TripState state) => state.masterCsvPath),
+    );
+    final String? chargingPathFromState = ref.watch(
+      chargingLiveProvider.select(
+        (chargingState) => chargingState.chargingLogCsvPath,
+      ),
     );
 
     return FutureBuilder<String>(
@@ -63,46 +97,112 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
       builder: (BuildContext context, AsyncSnapshot<String> snapshot) {
         final String? masterPath = masterPathFromState ?? snapshot.data;
 
-        return RefreshIndicator(
-          onRefresh: _refreshMasterCsvPath,
-          child: ListView(
-            padding: const EdgeInsets.all(16),
-            children: <Widget>[
-              Row(
+        return FutureBuilder<String>(
+          future: _chargingCsvFuture,
+          builder: (BuildContext context, AsyncSnapshot<String> chargingSnap) {
+            final String? chargingPath =
+                chargingPathFromState ?? chargingSnap.data;
+
+            return RefreshIndicator(
+              onRefresh: () async {
+                await _refreshMasterCsvPath();
+                await _refreshChargingCsvPath();
+              },
+              child: ListView(
+                padding: const EdgeInsets.all(16),
                 children: <Widget>[
-                  const Text(
-                    'Export Center',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                  Card(
+                    margin: const EdgeInsets.only(bottom: 14),
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          const Text(
+                            'Cloud Sync Status',
+                            style: TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                          const SizedBox(height: 6),
+                          Text('Pending queue: ${tripState.syncPendingCount}'),
+                          Text(
+                            'Status: ${tripState.syncInProgress ? 'Uploading...' : 'Idle'}',
+                          ),
+                          Text(
+                            'Last success: ${tripState.syncLastSuccessUtc?.toIso8601String() ?? '-'}',
+                          ),
+                          Text(
+                            'Last error: ${tripState.syncLastError ?? '-'}',
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
-                  const Spacer(),
-                  IconButton(
-                    tooltip: 'Refresh export paths',
-                    onPressed: _refreshMasterCsvPath,
-                    icon: const Icon(Icons.refresh),
+                  Row(
+                    children: <Widget>[
+                      const Text(
+                        'Export Center',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        tooltip: 'Refresh export paths',
+                        onPressed: () async {
+                          await _refreshMasterCsvPath();
+                          await _refreshChargingCsvPath();
+                        },
+                        icon: const Icon(Icons.refresh),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text('Master CSV: ${masterPath ?? 'Loading...'}'),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: masterPath == null
+                          ? null
+                          : () async {
+                              if (await File(masterPath).exists()) {
+                                await SharePlus.instance.share(
+                                  ShareParams(
+                                    files: <XFile>[XFile(masterPath)],
+                                  ),
+                                );
+                              }
+                            },
+                      icon: const Icon(Icons.ios_share),
+                      label: const Text('Share Master CSV'),
+                    ),
+                  ),
+                  const SizedBox(height: 22),
+                  Text('Charging Log CSV: ${chargingPath ?? 'Loading...'}'),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: chargingPath == null
+                          ? null
+                          : () async {
+                              if (await File(chargingPath).exists()) {
+                                await SharePlus.instance.share(
+                                  ShareParams(
+                                    files: <XFile>[XFile(chargingPath)],
+                                  ),
+                                );
+                              }
+                            },
+                      icon: const Icon(Icons.bolt),
+                      label: const Text('Share Charging Log CSV'),
+                    ),
                   ),
                 ],
               ),
-              const SizedBox(height: 6),
-              Text('Master CSV: ${masterPath ?? 'Loading...'}'),
-              const SizedBox(height: 18),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  onPressed: masterPath == null
-                      ? null
-                      : () async {
-                          if (await File(masterPath).exists()) {
-                            await SharePlus.instance.share(
-                              ShareParams(files: <XFile>[XFile(masterPath)]),
-                            );
-                          }
-                        },
-                  icon: const Icon(Icons.ios_share),
-                  label: const Text('Share Master CSV'),
-                ),
-              ),
-            ],
-          ),
+            );
+          },
         );
       },
     );

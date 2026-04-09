@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:path_provider/path_provider.dart';
 
+import '../models/charging_session_item.dart';
 import '../models/trip_history_item.dart';
 import '../models/telemetry_sample.dart';
 
@@ -96,6 +97,31 @@ class CsvService {
       mode: FileMode.append,
     );
     return master;
+  }
+
+  Future<File> getChargingLogFile() async {
+    final Directory root = await _rootDir();
+    final Directory tripsDir = Directory('${root.path}/trips');
+    if (!await tripsDir.exists()) {
+      await tripsDir.create(recursive: true);
+    }
+
+    final File file = File('${tripsDir.path}/Charging_log.csv');
+    if (!await file.exists()) {
+      await file.writeAsString(
+        '${_toCsvLine(ChargingSessionItem.csvHeader)}\n',
+      );
+    }
+    return file;
+  }
+
+  Future<File> appendChargingSummary(ChargingSessionItem item) async {
+    final File file = await getChargingLogFile();
+    await file.writeAsString(
+      '${_toCsvLine(item.toCsvRow())}\n',
+      mode: FileMode.append,
+    );
+    return file;
   }
 
   Future<void> deleteTempFile(String tempCsvPath) async {

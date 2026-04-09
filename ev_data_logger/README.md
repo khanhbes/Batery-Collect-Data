@@ -4,13 +4,21 @@ App Flutter thu thap telemetry EV theo tung giay, xuat CSV va chia se nhanh.
 
 ## CSV Output
 
-New trips are now exported to a single master file only:
+Trip summaries are exported to a single master file:
 
 ```text
 trips_master.csv
 ```
 
 Each finished trip appends exactly one summary row to this file.
+
+Charging sessions are exported separately to:
+
+```text
+Charging_log.csv
+```
+
+Each finished charging session appends exactly one row to this file.
 
 ## Weather API
 

@@ -80,9 +80,54 @@ class ActiveTripScreen extends ConsumerWidget {
                   'Payload (kg): ${telemetry?.payloadKg.toStringAsFixed(1) ?? '-'}',
                 ),
                 Text(
+                  'Effective Payload (kg): ${telemetry?.effectivePayloadKg.toStringAsFixed(1) ?? ((tripState.session?.payloadKg ?? 0) + (tripState.isPassengerOn ? 65 : 0)).toStringAsFixed(1)}',
+                ),
+                Text('Passenger: ${tripState.isPassengerOn ? 'ON (+65kg)' : 'OFF'}'),
+                Text(
                   'Ambient Temp (C): ${telemetry?.ambientTempC?.toStringAsFixed(1) ?? '-'}',
                 ),
                 Text('Weather: ${telemetry?.weatherCondition ?? '-'}'),
+                const SizedBox(height: 10),
+                Card(
+                  margin: EdgeInsets.zero,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        SwitchListTile.adaptive(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('Passenger onboard (+65kg)'),
+                          subtitle: const Text(
+                            'Updates effective payload for live telemetry and cloud sync.',
+                          ),
+                          value: tripState.isPassengerOn,
+                          onChanged: tripState.isTracking
+                              ? (bool value) {
+                                  ref
+                                      .read(tripControllerProvider.notifier)
+                                      .setPassengerOn(value);
+                                }
+                              : null,
+                        ),
+                        const SizedBox(height: 6),
+                        Text('Sync pending: ${tripState.syncPendingCount}'),
+                        Text(
+                          'Sync status: ${tripState.syncInProgress ? 'Uploading...' : 'Idle'}',
+                        ),
+                        Text(
+                          'Last sync success: ${tripState.syncLastSuccessUtc?.toIso8601String() ?? '-'}',
+                        ),
+                        Text(
+                          'Last sync error: ${tripState.syncLastError ?? '-'}',
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
                 const SizedBox(height: 14),
                 if (tripState.errorMessage != null)
                   Text(

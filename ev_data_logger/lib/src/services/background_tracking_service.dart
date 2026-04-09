@@ -55,6 +55,10 @@ Map<String, dynamic>? _buildTickPayload({
     'start_soc': trip['start_soc'],
     'end_soc': null,
     'payload_kg': trip['payload_kg'],
+    'effective_payload_kg':
+      (trip['effective_payload_kg'] as num?)?.toDouble() ??
+      (trip['payload_kg'] as num).toDouble(),
+    'passenger_on': (trip['passenger_on'] as bool?) ?? false,
     'ambient_temp_c': trip['ambient_temp_c'],
     'weather_condition': trip['weather_condition'],
     'vehicle_type': trip['vehicle_type'],
@@ -305,6 +309,12 @@ Future<void> backgroundServiceEntryPoint(ServiceInstance service) async {
       if (map.containsKey('ambient_temp_c')) {
         _bgTrip!['ambient_temp_c'] = map['ambient_temp_c'];
       }
+      if (map.containsKey('effective_payload_kg')) {
+        _bgTrip!['effective_payload_kg'] = map['effective_payload_kg'];
+      }
+      if (map.containsKey('passenger_on')) {
+        _bgTrip!['passenger_on'] = map['passenger_on'];
+      }
       _emitDebug(service, 'Trip metadata updated');
     } catch (error) {
       _emitError(service, error);
@@ -416,6 +426,8 @@ class BackgroundTrackingService {
       'trip_id': session.tripId,
       'start_soc': session.startSoc,
       'payload_kg': session.payloadKg,
+      'effective_payload_kg': session.payloadKg,
+      'passenger_on': false,
       'ambient_temp_c': session.ambientTempC,
       'weather_condition': session.weatherCondition,
       'vehicle_type': session.vehicleType,
@@ -434,13 +446,18 @@ class BackgroundTrackingService {
     required String tripId,
     required String weatherCondition,
     required double? ambientTempC,
+    double? effectivePayloadKg,
+    bool? passengerOn,
   }) async {
     await _ensureServiceRunning();
-    _service.invoke('trip.update_meta', <String, dynamic>{
+    final Map<String, dynamic> payload = <String, dynamic>{
       'trip_id': tripId,
       'weather_condition': weatherCondition,
       'ambient_temp_c': ambientTempC,
-    });
+      'effective_payload_kg': effectivePayloadKg,
+      'passenger_on': passengerOn,
+    }..removeWhere((String _, dynamic value) => value == null);
+    _service.invoke('trip.update_meta', payload);
   }
 
   Future<Map<String, dynamic>> stopTrip() async {

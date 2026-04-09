@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:ev_data_logger/src/models/charging_session_item.dart';
 import 'package:ev_data_logger/src/models/route_point.dart';
 import 'package:ev_data_logger/src/models/telemetry_sample.dart';
 import 'package:ev_data_logger/src/models/trip_history_item.dart';
@@ -110,4 +111,31 @@ void main() {
       );
     });
   });
+  test(
+    'Charging_log.csv writes correct header and one row per session',
+    () async {
+      final Directory dir = await Directory.systemTemp.createTemp(
+        'charging_csv_',
+      );
+      final CsvService service = CsvService(baseDirectory: dir);
+
+      final ChargingSessionItem item = ChargingSessionItem(
+        chargeId: 'charge_1',
+        startTimestampUtc: DateTime.parse('2026-01-01T00:00:00Z'),
+        endTimestampUtc: DateTime.parse('2026-01-01T01:00:00Z'),
+        startSoc: 20,
+        endSoc: 80,
+        latitude: 10.123456,
+        longitude: 106.654321,
+        ambientTempC: 31.5,
+      );
+
+      final File file = await service.appendChargingSummary(item);
+      final List<String> lines = await file.readAsLines();
+      expect(lines.length, 2);
+      expect(lines.first, ChargingSessionItem.csvHeader.join(','));
+      expect(lines[1], contains('charge_1'));
+      expect(lines[1], contains(',20,80,'));
+    },
+  );
 }

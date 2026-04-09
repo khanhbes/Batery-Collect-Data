@@ -13,6 +13,11 @@ class TripState {
     required this.latestTelemetry,
     required this.routePoints,
     required this.debugLogs,
+    required this.isPassengerOn,
+    required this.syncPendingCount,
+    required this.syncLastSuccessUtc,
+    required this.syncLastError,
+    required this.syncInProgress,
     required this.masterCsvPath,
     required this.errorMessage,
   });
@@ -28,6 +33,11 @@ class TripState {
       latestTelemetry: null,
       routePoints: <RoutePoint>[],
       debugLogs: <String>[],
+      isPassengerOn: false,
+      syncPendingCount: 0,
+      syncLastSuccessUtc: null,
+      syncLastError: null,
+      syncInProgress: false,
       masterCsvPath: null,
       errorMessage: null,
     );
@@ -42,6 +52,11 @@ class TripState {
   final TelemetryLiveSnapshot? latestTelemetry;
   final List<RoutePoint> routePoints;
   final List<String> debugLogs;
+  final bool isPassengerOn;
+  final int syncPendingCount;
+  final DateTime? syncLastSuccessUtc;
+  final String? syncLastError;
+  final bool syncInProgress;
   final String? masterCsvPath;
   final String? errorMessage;
 
@@ -55,12 +70,19 @@ class TripState {
     TelemetryLiveSnapshot? latestTelemetry,
     List<RoutePoint>? routePoints,
     List<String>? debugLogs,
+    bool? isPassengerOn,
+    int? syncPendingCount,
+    DateTime? syncLastSuccessUtc,
+    String? syncLastError,
+    bool? syncInProgress,
     String? masterCsvPath,
     String? errorMessage,
     bool clearSession = false,
     bool clearLatestTelemetry = false,
     bool clearRoutePoints = false,
     bool clearDebugLogs = false,
+    bool clearSyncLastSuccessUtc = false,
+    bool clearSyncLastError = false,
     bool clearMasterCsvPath = false,
     bool clearErrorMessage = false,
   }) {
@@ -78,6 +100,15 @@ class TripState {
           ? <RoutePoint>[]
           : routePoints ?? this.routePoints,
       debugLogs: clearDebugLogs ? <String>[] : debugLogs ?? this.debugLogs,
+        isPassengerOn: isPassengerOn ?? this.isPassengerOn,
+        syncPendingCount: syncPendingCount ?? this.syncPendingCount,
+        syncLastSuccessUtc: clearSyncLastSuccessUtc
+          ? null
+          : syncLastSuccessUtc ?? this.syncLastSuccessUtc,
+        syncLastError: clearSyncLastError
+          ? null
+          : syncLastError ?? this.syncLastError,
+        syncInProgress: syncInProgress ?? this.syncInProgress,
       masterCsvPath: clearMasterCsvPath
           ? null
           : masterCsvPath ?? this.masterCsvPath,

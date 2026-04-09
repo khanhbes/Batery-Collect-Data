@@ -15,6 +15,7 @@ import '../models/trip_session.dart';
 import '../models/weather_snapshot.dart';
 import '../services/background_tracking_service.dart';
 import '../services/csv_service.dart';
+import '../services/drive_sync_service.dart';
 import '../services/location_service.dart';
 import '../services/trip_persistence_service.dart';
 import '../services/weather_service.dart';
@@ -27,6 +28,9 @@ class TripController extends Notifier<TripState> {
   late final BackgroundTrackingService _backgroundService;
   late final CsvService _csvService;
   late final TripPersistenceService _persistenceService;
+  late final DriveSyncService _driveSyncService;
+
+  StreamSubscription<SyncStatus>? _syncStatusSub;
 
   @override
   TripState build() {
@@ -35,12 +39,33 @@ class TripController extends Notifier<TripState> {
     _backgroundService = ref.read(backgroundServiceProvider);
     _csvService = ref.read(csvServiceProvider);
     _persistenceService = ref.read(tripPersistenceServiceProvider);
+    _driveSyncService = ref.read(driveSyncServiceProvider);
+
+    unawaited(_driveSyncService.initialize());
+    _syncStatusSub?.cancel();
+    _syncStatusSub = _driveSyncService.statusStream.listen((SyncStatus s) {
+      state = state.copyWith(
+        syncPendingCount: s.pendingCount,
+        syncInProgress: s.isFlushing,
+        syncLastSuccessUtc: s.lastSuccessUtc,
+        clearSyncLastSuccessUtc: s.lastSuccessUtc == null,
+        syncLastError: s.lastError,
+        clearSyncLastError: s.lastError == null,
+      );
+    });
+    final SyncStatus initialSync = _driveSyncService.status;
 
     ref.onDispose(() {
       _telemetrySub?.cancel();
+      _syncStatusSub?.cancel();
     });
 
-    return TripState.initial();
+    return TripState.initial().copyWith(
+      syncPendingCount: initialSync.pendingCount,
+      syncInProgress: initialSync.isFlushing,
+      syncLastSuccessUtc: initialSync.lastSuccessUtc,
+      syncLastError: initialSync.lastError,
+    );
   }
 
   StreamSubscription<Map<String, dynamic>>? _telemetrySub;
@@ -91,6 +116,7 @@ class TripController extends Notifier<TripState> {
       clearLatestTelemetry: true,
       clearRoutePoints: true,
       clearDebugLogs: true,
+      isPassengerOn: false,
       clearErrorMessage: true,
     );
     _appendDebug(
@@ -148,6 +174,8 @@ class TripController extends Notifier<TripState> {
         tripId: updated.tripId,
         weatherCondition: updated.weatherCondition,
         ambientTempC: updated.ambientTempC,
+        effectivePayloadKg: _effectivePayloadKg(),
+        passengerOn: state.isPassengerOn,
       );
 
       if (state.session?.tripId == updated.tripId) {
@@ -206,6 +234,7 @@ class TripController extends Notifier<TripState> {
         .stopTrip();
     // Cancel the telemetry subscription before we clear state.
     _telemetrySub?.cancel();
+    _syncStatusSub?.cancel();
     _telemetrySub = null;
 
     final DateTime endedUtc = DateTime.now().toUtc();
@@ -331,6 +360,30 @@ class TripController extends Notifier<TripState> {
           totalDistanceKm: telemetry.distanceKm,
           clearErrorMessage: true,
         );
+
+        final TripSession? session = state.session;
+        if (session != null) {
+          unawaited(
+            _driveSyncService.enqueueMovement(<String, dynamic>{
+              'trip_id': session.tripId,
+              'timestamp_utc': telemetry.timestampUtc.toIso8601String(),
+              'elapsed_sec': telemetry.elapsedSec,
+              'sample_count': telemetry.sampleCount,
+              'speed_kmh': telemetry.speedKmh,
+              'accel_ms2': telemetry.accelerationMs2,
+              'distance_km': telemetry.distanceKm,
+              'latitude': telemetry.latitude,
+              'longitude': telemetry.longitude,
+              'altitude_m': telemetry.altitudeM,
+              'start_soc': telemetry.startSoc,
+              'payload_kg': telemetry.payloadKg,
+              'effective_payload_kg': telemetry.effectivePayloadKg,
+              'passenger_on': telemetry.passengerOn,
+              'ambient_temp_c': telemetry.ambientTempC,
+              'weather_condition': telemetry.weatherCondition,
+            }),
+          );
+        }
         return;
       }
 
@@ -382,6 +435,34 @@ class TripController extends Notifier<TripState> {
       next.removeRange(0, next.length - 150);
     }
     state = state.copyWith(debugLogs: next);
+  }
+
+  Future<void> setPassengerOn(bool value) async {
+    final TripSession? session = state.session;
+    if (session == null) {
+      return;
+    }
+
+    state = state.copyWith(isPassengerOn: value);
+    final double effectivePayloadKg = _effectivePayloadKg();
+    await _backgroundService.updateTripMetadata(
+      tripId: session.tripId,
+      weatherCondition: session.weatherCondition,
+      ambientTempC: session.ambientTempC,
+      effectivePayloadKg: effectivePayloadKg,
+      passengerOn: value,
+    );
+    _appendDebug(
+      'Passenger ${value ? 'ON' : 'OFF'}; effective payload=${effectivePayloadKg.toStringAsFixed(1)} kg',
+    );
+  }
+
+  double _effectivePayloadKg() {
+    final TripSession? session = state.session;
+    if (session == null) {
+      return 0;
+    }
+    return session.payloadKg + (state.isPassengerOn ? 65 : 0);
   }
 
   Future<_TempTripStats> _readTempTripStats(String tempCsvPath) async {

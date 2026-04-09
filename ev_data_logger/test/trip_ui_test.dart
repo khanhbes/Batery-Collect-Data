@@ -22,6 +22,11 @@ void main() {
       latestTelemetry: null,
       routePoints: <RoutePoint>[],
       debugLogs: <String>['first log', 'second log'],
+      isPassengerOn: false,
+      syncPendingCount: 0,
+      syncLastSuccessUtc: null,
+      syncLastError: null,
+      syncInProgress: false,
       masterCsvPath: null,
       errorMessage: null,
     );
