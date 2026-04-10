@@ -110,3 +110,105 @@ adb pull /data/tombstones/tombstone_00
 - Android native crash debugging docs:
   https://source.android.com/docs/core/tests/debug/native-crash
 
+## Cloud Sync with Google Apps Script
+
+The app can sync movement telemetry and charging sessions to a Google Sheet via
+Google Apps Script webhooks in real-time.
+
+### Quick Setup
+
+1. Create a Google Apps Script project at https://script.google.com
+2. Create two sheets in a Google Sheet:
+   - `Movement` (for telemetry: timestamp, lat, lng, SOC, payload, etc.)
+   - `Charging` (for charging sessions: start/end time, SOC delta, energy, etc.)
+3. Copy the Apps Script code from `APPS_SCRIPT_SETUP.md` to your project
+4. Deploy as Web App → note the URL (e.g., `https://script.google.com/macros/d/{ID}/usercopy`)
+5. Set webhook URLs in `lib/src/config/app_secrets.dart`:
+   ```dart
+   const kMovementWebhookUrl = 'YOUR_APPS_SCRIPT_URL';
+   const kChargingWebhookUrl = 'YOUR_APPS_SCRIPT_URL';
+   const kDriveWebhookApiKey = 'YOUR_SECRET_KEY';
+   ```
+6. Rebuild and run. Sync status appears on Live and Export screens.
+
+### Sync Features
+
+- **Real-time movement**: Every 1-2s telemetry tick is batched (max 20 items) and sent to Google Sheet
+- **Charging summary**: When charging session ends, summary is sent for logging
+- **Offline resilience**: Queue persists locally; failed items retry with exponential backoff (1s → 5m max)
+- **HTTP redirect handling**: Follows 301/302/303/307/308 Location headers automatically
+- **API key flexibility**: Accepts key in request body or query parameter
+
+### Payload Format
+
+#### Batch Movement Request
+```json
+{
+  "target": "movement",
+  "key": "YOUR_API_KEY",
+  "records": [
+    {
+      "timestamp": "2024-01-15T10:30:00Z",
+      "latitude": 21.028511,
+      "longitude": 105.852393,
+      "accuracy": 5,
+      "altitude": 20,
+      "speed": 12.5,
+      "heading": 180,
+      "soc": 75,
+      "payload_kg": 1500,
+      "effective_payload_kg": 1565,
+      "passenger_on": true,
+      "voltage": 400,
+      "current": 2.5,
+      "temperature": 45
+    },
+    ...
+  ]
+}
+```
+
+#### Single Charging Request
+```json
+{
+  "target": "charging",
+  "key": "YOUR_API_KEY",
+  "record": {
+    "start_time": "2024-01-15T08:00:00Z",
+    "end_time": "2024-01-15T09:30:00Z",
+    "start_soc": 20,
+    "end_soc": 80,
+    "duration_minutes": 90,
+    "energy_added_kwh": 45,
+    "location": "DC Fast Charger - Hà Nội",
+    "charger_type": "150kW DC",
+    "payload_kg": 1500
+  }
+}
+```
+
+#### Expected Response
+```json
+{
+  "status": "ok",
+  "target": "movement",
+  "accepted": 20
+}
+```
+
+### Monitoring Sync
+
+- **Live Screen**: Shows real-time sync queue count and last error (if any)
+- **Export Screen**: Displays sync status card with pending count, last success, and error details
+- **Local Fallback**: If sync fails, data remains in local CSV files and retries automatically
+
+### Troubleshooting
+
+- **401 Unauthorized**: API key mismatch between Flutter config and Apps Script
+- **HTTP 302 Redirect**: Automatically handled; verify Apps Script deployment URL
+- **Sheet Not Found**: Check sheet name case sensitivity (Motion vs Charging)
+- **Batch stalling**: Check queue in Export screen; if >500 items, may indicate webhook failure
+- **Sync disabled**: Verify webhook URLs are non-empty in `app_secrets.dart`
+
+For full Apps Script setup details, see [APPS_SCRIPT_SETUP.md](./APPS_SCRIPT_SETUP.md).
+

@@ -54,12 +54,20 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
     super.dispose();
   }
 
-  Future<String> _loadMasterCsvPath() {
-    return ref.read(tripControllerProvider.notifier).masterCsvPath();
+  Future<String> _loadMasterCsvPath() async {
+    try {
+      return await ref.read(tripControllerProvider.notifier).masterCsvPath();
+    } catch (_) {
+      return '';
+    }
   }
 
-  Future<String> _loadChargingCsvPath() {
-    return ref.read(chargingControllerProvider.notifier).chargingLogCsvPath();
+  Future<String> _loadChargingCsvPath() async {
+    try {
+      return await ref.read(chargingControllerProvider.notifier).chargingLogCsvPath();
+    } catch (_) {
+      return '';
+    }
   }
 
   Future<void> _refreshMasterCsvPath() async {
@@ -119,19 +127,95 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: <Widget>[
                           const Text(
-                            'Cloud Sync Status',
+                            'Movement Sync',
                             style: TextStyle(fontWeight: FontWeight.w700),
                           ),
                           const SizedBox(height: 6),
-                          Text('Pending queue: ${tripState.syncPendingCount}'),
+                          Text('Pending: ${tripState.movementPendingCount}'),
                           Text(
-                            'Status: ${tripState.syncInProgress ? 'Uploading...' : 'Idle'}',
+                            'Status: ${tripState.movementSyncPaused ? 'Paused' : tripState.movementSyncInProgress ? 'Uploading...' : 'Idle'}',
                           ),
                           Text(
-                            'Last success: ${tripState.syncLastSuccessUtc?.toIso8601String() ?? '-'}',
+                            'Last success: ${tripState.movementLastSuccessUtc?.toIso8601String() ?? '-'}',
                           ),
                           Text(
-                            'Last error: ${tripState.syncLastError ?? '-'}',
+                            'Last error: ${tripState.movementLastError ?? '-'}',
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            children: <Widget>[
+                              TextButton.icon(
+                                onPressed: () {
+                                  final ctrl = ref.read(tripControllerProvider.notifier);
+                                  if (tripState.movementSyncPaused) {
+                                    ctrl.resumeMovementSync();
+                                  } else {
+                                    ctrl.pauseMovementSync();
+                                  }
+                                },
+                                icon: Icon(tripState.movementSyncPaused ? Icons.play_arrow : Icons.pause),
+                                label: Text(tripState.movementSyncPaused ? 'Resume' : 'Pause'),
+                              ),
+                              const SizedBox(width: 8),
+                              TextButton.icon(
+                                onPressed: () {
+                                  ref.read(tripControllerProvider.notifier).retryMovementSync();
+                                },
+                                icon: const Icon(Icons.refresh),
+                                label: const Text('Retry'),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  Card(
+                    margin: const EdgeInsets.only(bottom: 14),
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          const Text(
+                            'Charging Sync',
+                            style: TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                          const SizedBox(height: 6),
+                          Text('Pending: ${tripState.chargingPendingCount}'),
+                          Text(
+                            'Status: ${tripState.chargingSyncPaused ? 'Paused' : tripState.chargingSyncInProgress ? 'Uploading...' : 'Idle'}',
+                          ),
+                          Text(
+                            'Last success: ${tripState.chargingLastSuccessUtc?.toIso8601String() ?? '-'}',
+                          ),
+                          Text(
+                            'Last error: ${tripState.chargingLastError ?? '-'}',
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            children: <Widget>[
+                              TextButton.icon(
+                                onPressed: () {
+                                  final ctrl = ref.read(tripControllerProvider.notifier);
+                                  if (tripState.chargingSyncPaused) {
+                                    ctrl.resumeChargingSync();
+                                  } else {
+                                    ctrl.pauseChargingSync();
+                                  }
+                                },
+                                icon: Icon(tripState.chargingSyncPaused ? Icons.play_arrow : Icons.pause),
+                                label: Text(tripState.chargingSyncPaused ? 'Resume' : 'Pause'),
+                              ),
+                              const SizedBox(width: 8),
+                              TextButton.icon(
+                                onPressed: () {
+                                  ref.read(tripControllerProvider.notifier).retryChargingSync();
+                                },
+                                icon: const Icon(Icons.refresh),
+                                label: const Text('Retry'),
+                              ),
+                            ],
                           ),
                         ],
                       ),
@@ -176,6 +260,34 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
                             },
                       icon: const Icon(Icons.ios_share),
                       label: const Text('Share Master CSV'),
+                    ),
+                  ),
+                  const SizedBox(height: 22),
+                  const Text(
+                    'Active Trip Details',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: tripState.tempCsvPath == null
+                          ? null
+                          : () async {
+                              final File f = File(tripState.tempCsvPath!);
+                              if (await f.exists()) {
+                                await SharePlus.instance.share(
+                                  ShareParams(
+                                    files: <XFile>[XFile(tripState.tempCsvPath!)],
+                                  ),
+                                );
+                              }
+                            },
+                      icon: const Icon(Icons.location_on),
+                      label: const Text('Share Trip Detail CSV (Current)'),
                     ),
                   ),
                   const SizedBox(height: 22),

@@ -114,16 +114,19 @@ class ActiveTripScreen extends ConsumerWidget {
                               : null,
                         ),
                         const SizedBox(height: 6),
-                        Text('Sync pending: ${tripState.syncPendingCount}'),
-                        Text(
-                          'Sync status: ${tripState.syncInProgress ? 'Uploading...' : 'Idle'}',
-                        ),
-                        Text(
-                          'Last sync success: ${tripState.syncLastSuccessUtc?.toIso8601String() ?? '-'}',
-                        ),
-                        Text(
-                          'Last sync error: ${tripState.syncLastError ?? '-'}',
-                        ),
+                        Text('Movement sync: ${tripState.movementPendingCount} pending${tripState.movementSyncPaused ? ' (PAUSED)' : tripState.movementSyncInProgress ? ' (uploading)' : ''}'),
+                        if (tripState.movementLastError != null)
+                          Text(
+                            'Movement error: ${tripState.movementLastError}',
+                            style: const TextStyle(color: Colors.orange, fontSize: 12),
+                          ),
+                        const SizedBox(height: 4),
+                        Text('Charging sync: ${tripState.chargingPendingCount} pending${tripState.chargingSyncPaused ? ' (PAUSED)' : tripState.chargingSyncInProgress ? ' (uploading)' : ''}'),
+                        if (tripState.chargingLastError != null)
+                          Text(
+                            'Charging error: ${tripState.chargingLastError}',
+                            style: const TextStyle(color: Colors.orange, fontSize: 12),
+                          ),
                       ],
                     ),
                   ),

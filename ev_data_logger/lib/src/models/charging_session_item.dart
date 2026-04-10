@@ -1,3 +1,5 @@
+import '../utils/type_helpers.dart';
+
 class ChargingSessionItem {
   const ChargingSessionItem({
     required this.chargeId,
@@ -8,6 +10,7 @@ class ChargingSessionItem {
     required this.latitude,
     required this.longitude,
     required this.ambientTempC,
+    this.rawDataPath,
   });
 
   static const List<String> csvHeader = <String>[
@@ -29,6 +32,7 @@ class ChargingSessionItem {
   final double latitude;
   final double longitude;
   final double? ambientTempC;
+  final String? rawDataPath;
 
   bool get isCompleted => endTimestampUtc != null && endSoc != null;
 
@@ -41,6 +45,7 @@ class ChargingSessionItem {
     double? latitude,
     double? longitude,
     double? ambientTempC,
+    String? rawDataPath,
     bool clearEndTimestamp = false,
     bool clearEndSoc = false,
     bool clearAmbientTemp = false,
@@ -56,6 +61,7 @@ class ChargingSessionItem {
       latitude: latitude ?? this.latitude,
       longitude: longitude ?? this.longitude,
       ambientTempC: clearAmbientTemp ? null : ambientTempC ?? this.ambientTempC,
+      rawDataPath: rawDataPath ?? this.rawDataPath,
     );
   }
 
@@ -82,23 +88,25 @@ class ChargingSessionItem {
       'latitude': latitude,
       'longitude': longitude,
       'ambientTempC': ambientTempC,
+      'rawDataPath': rawDataPath,
     };
   }
 
   factory ChargingSessionItem.fromJson(Map<String, dynamic> json) {
     return ChargingSessionItem(
-      chargeId: json['chargeId'] as String,
+      chargeId: toStringLoose(json['chargeId']),
       startTimestampUtc: DateTime.parse(
-        json['startTimestampUtc'] as String,
+        toStringLoose(json['startTimestampUtc']),
       ).toUtc(),
       endTimestampUtc: json['endTimestampUtc'] == null
           ? null
-          : DateTime.parse(json['endTimestampUtc'] as String).toUtc(),
-      startSoc: json['startSoc'] as int,
-      endSoc: (json['endSoc'] as num?)?.toInt(),
-      latitude: (json['latitude'] as num).toDouble(),
-      longitude: (json['longitude'] as num).toDouble(),
-      ambientTempC: (json['ambientTempC'] as num?)?.toDouble(),
+          : DateTime.parse(toStringLoose(json['endTimestampUtc'])).toUtc(),
+      startSoc: toIntLoose(json['startSoc']) ?? 0,
+      endSoc: toIntLoose(json['endSoc']),
+      latitude: toDoubleLoose(json['latitude']) ?? 0,
+      longitude: toDoubleLoose(json['longitude']) ?? 0,
+      ambientTempC: toDoubleLoose(json['ambientTempC']),
+      rawDataPath: json['rawDataPath'] as String?,
     );
   }
 }

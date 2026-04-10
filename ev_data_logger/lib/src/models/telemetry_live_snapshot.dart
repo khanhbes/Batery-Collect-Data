@@ -38,26 +38,104 @@ class TelemetryLiveSnapshot {
   final double distanceKm;
 
   factory TelemetryLiveSnapshot.fromMap(Map<String, dynamic> map) {
-    return TelemetryLiveSnapshot(
-      timestampUtc: DateTime.parse(map['timestamp'] as String).toUtc(),
-      latitude: (map['latitude'] as num).toDouble(),
-      longitude: (map['longitude'] as num).toDouble(),
-      speedKmh: (map['speed_kmh'] as num).toDouble(),
-      altitudeM: (map['altitude_m'] as num).toDouble(),
-      accelerationMs2: (map['acceleration_ms2'] as num).toDouble(),
-      startSoc: map['start_soc'] as int,
-      endSoc: map['end_soc'] as int?,
-      payloadKg: (map['payload_kg'] as num).toDouble(),
-        effectivePayloadKg:
-          (map['effective_payload_kg'] as num?)?.toDouble() ??
-          (map['payload_kg'] as num).toDouble(),
-        passengerOn: (map['passenger_on'] as bool?) ?? false,
-      ambientTempC: (map['ambient_temp_c'] as num?)?.toDouble(),
-      weatherCondition: map['weather_condition'] as String,
-      vehicleType: (map['vehicle_type'] as String?) ?? 'Electric Vehicle',
-      sampleCount: map['sample_count'] as int,
-      elapsedSec: map['elapsed_sec'] as int,
-      distanceKm: (map['distance_km'] as num).toDouble(),
+    final DateTime timestampUtc = _parseTimestamp(
+      map['timestamp'] ?? map['timestamp_utc'],
     );
+    return TelemetryLiveSnapshot(
+      timestampUtc: timestampUtc,
+      latitude: _asDouble(map['latitude']) ?? 0,
+      longitude: _asDouble(map['longitude']) ?? 0,
+      speedKmh: _asDouble(map['speed_kmh']) ?? 0,
+      altitudeM: _asDouble(map['altitude_m']) ?? 0,
+      accelerationMs2: _asDouble(map['acceleration_ms2']) ?? 0,
+      startSoc: _asInt(map['start_soc']) ?? 0,
+      endSoc: _asInt(map['end_soc']),
+      payloadKg: _asDouble(map['payload_kg']) ?? 0,
+      effectivePayloadKg:
+          _asDouble(map['effective_payload_kg']) ??
+          (_asDouble(map['payload_kg']) ?? 0),
+      passengerOn: _asBool(map['passenger_on']) ?? false,
+      ambientTempC: _asDouble(map['ambient_temp_c']),
+      weatherCondition: (map['weather_condition'] as String?) ?? 'unknown',
+      vehicleType: (map['vehicle_type'] as String?) ?? 'Electric Vehicle',
+      sampleCount: _asInt(map['sample_count']) ?? 0,
+      elapsedSec: _asInt(map['elapsed_sec']) ?? 0,
+      distanceKm: _asDouble(map['distance_km']) ?? 0,
+    );
+  }
+
+  static DateTime _parseTimestamp(dynamic value) {
+    if (value is DateTime) {
+      return value.toUtc();
+    }
+    if (value is String && value.trim().isNotEmpty) {
+      return DateTime.tryParse(value)?.toUtc() ?? DateTime.now().toUtc();
+    }
+    return DateTime.now().toUtc();
+  }
+
+  static int? _asInt(dynamic value) {
+    if (value == null) {
+      return null;
+    }
+    if (value is int) {
+      return value;
+    }
+    if (value is num) {
+      return value.toInt();
+    }
+    if (value is String) {
+      final String trimmed = value.trim();
+      if (trimmed.isEmpty) {
+        return null;
+      }
+      return int.tryParse(trimmed) ?? double.tryParse(trimmed)?.toInt();
+    }
+    return null;
+  }
+
+  static double? _asDouble(dynamic value) {
+    if (value == null) {
+      return null;
+    }
+    if (value is double) {
+      return value;
+    }
+    if (value is num) {
+      return value.toDouble();
+    }
+    if (value is String) {
+      final String trimmed = value.trim();
+      if (trimmed.isEmpty) {
+        return null;
+      }
+      return double.tryParse(trimmed);
+    }
+    return null;
+  }
+
+  static bool? _asBool(dynamic value) {
+    if (value == null) {
+      return null;
+    }
+    if (value is bool) {
+      return value;
+    }
+    if (value is num) {
+      return value != 0;
+    }
+    if (value is String) {
+      final String normalized = value.trim().toLowerCase();
+      if (normalized == 'true' || normalized == '1' || normalized == 'yes') {
+        return true;
+      }
+      if (normalized == 'false' ||
+          normalized == '0' ||
+          normalized == 'no' ||
+          normalized.isEmpty) {
+        return false;
+      }
+    }
+    return null;
   }
 }

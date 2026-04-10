@@ -126,6 +126,32 @@ class CsvService {
     }
   }
 
+  Future<void> deleteRawFile(String rawDataPath) async {
+    final File file = File(rawDataPath);
+    if (await file.exists()) {
+      await file.delete();
+    }
+  }
+
+  /// Move a temp trip CSV to a permanent raw path.
+  /// Returns the new path, or null if the temp file did not exist.
+  Future<String?> moveToRawPath(String tempCsvPath, String tripId) async {
+    final File tempFile = File(tempCsvPath);
+    if (!await tempFile.exists()) {
+      return null;
+    }
+
+    final Directory root = await _rootDir();
+    final Directory rawDir = Directory('${root.path}/trips/raw');
+    if (!await rawDir.exists()) {
+      await rawDir.create(recursive: true);
+    }
+
+    final String newPath = '${rawDir.path}/trip_$tripId.csv';
+    final File newFile = await tempFile.rename(newPath);
+    return newFile.path;
+  }
+
   String _toCsvLine(List<dynamic> row) {
     return row.map((dynamic value) => '$value').join(',');
   }

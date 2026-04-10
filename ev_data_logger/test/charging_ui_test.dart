@@ -1,5 +1,6 @@
 import 'package:ev_data_logger/src/controllers/charging_state.dart';
 import 'package:ev_data_logger/src/controllers/trip_providers.dart';
+import 'package:ev_data_logger/src/controllers/trip_state.dart';
 import 'package:ev_data_logger/src/models/charging_session_item.dart';
 import 'package:ev_data_logger/src/ui/screens/charging_screen.dart';
 import 'package:ev_data_logger/src/ui/screens/export_screen.dart';
@@ -45,12 +46,26 @@ void main() {
 
     await tester.pumpWidget(
       ProviderScope(
-        overrides: [chargingLiveProvider.overrideWithValue(chargingState)],
+        overrides: [
+          chargingLiveProvider.overrideWithValue(chargingState),
+          tripLiveProvider.overrideWithValue(TripState.initial()),
+        ],
         child: const MaterialApp(home: Scaffold(body: ExportScreen())),
       ),
     );
 
-    await tester.pumpAndSettle();
+    // Pump multiple times to allow async FutureBuilders to resolve
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump(const Duration(milliseconds: 500));
+
+    // Scroll down to reach the charging log section
+    await tester.scrollUntilVisible(
+      find.text('Share Charging Log CSV'),
+      200,
+    );
+    await tester.pump();
+
     expect(find.text('Share Charging Log CSV'), findsOneWidget);
   });
 }

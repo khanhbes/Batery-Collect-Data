@@ -1,3 +1,5 @@
+import '../utils/type_helpers.dart';
+
 class TripSession {
   const TripSession({
     required this.tripId,
@@ -34,14 +36,14 @@ class TripSession {
 
   factory TripSession.fromJson(Map<String, dynamic> json) {
     return TripSession(
-      tripId: json['tripId'] as String,
-      vehicleType: (json['vehicleType'] as String?) ?? 'Electric Vehicle',
-      startSoc: json['startSoc'] as int,
-      payloadKg: (json['payloadKg'] as num).toDouble(),
-      startTimeUtc: DateTime.parse(json['startTimeUtc'] as String).toUtc(),
-      tempCsvPath: json['tempCsvPath'] as String,
-      weatherCondition: json['weatherCondition'] as String,
-      ambientTempC: (json['ambientTempC'] as num?)?.toDouble(),
+      tripId: toStringLoose(json['tripId']),
+      vehicleType: toStringLoose(json['vehicleType'], fallback: 'Electric Vehicle'),
+      startSoc: toIntLoose(json['startSoc']) ?? 0,
+      payloadKg: toDoubleLoose(json['payloadKg']) ?? 0,
+      startTimeUtc: DateTime.parse(toStringLoose(json['startTimeUtc'])).toUtc(),
+      tempCsvPath: toStringLoose(json['tempCsvPath']),
+      weatherCondition: toStringLoose(json['weatherCondition'], fallback: 'unknown'),
+      ambientTempC: toDoubleLoose(json['ambientTempC']),
     );
   }
 }

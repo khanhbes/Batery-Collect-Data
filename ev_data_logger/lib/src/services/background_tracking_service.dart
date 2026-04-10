@@ -13,11 +13,28 @@ StreamSubscription<Position>? _bgPositionSub;
 Timer? _bgTickTimer;
 Position? _bgLatestPosition;
 Position? _bgPrevDistancePosition;
-double _bgLastSpeedMps = 0;
 double _bgDistanceKm = 0;
 int _bgSampleCount = 0;
 Map<String, dynamic>? _bgTrip;
 bool _bgFirstFixEmitted = false;
+DateTime? _bgLastGpsTimestamp;
+DateTime? _bgLastTickTimestamp;
+double _bgLastTickSpeedMps = 0;
+
+// ── EMA speed smoothing state ──
+double _bgEmaSpeedKmh = 0;
+const double _emaAlpha = 0.35;
+const double _deadbandKmh = 2.0; // "Balanced" profile: 2 km/h
+// Minimum segment distance (m) to count as real movement when speed > 0
+const double _minSegmentM = 3.0;
+// Acceleration clamp bounds (m/s²)
+const double _accelClampMin = -6.0;
+const double _accelClampMax = 4.0;
+// Altitude validity range
+const double _altMin = -100.0;
+const double _altMax = 2000.0;
+// Previous tick position for unified kinematics (speed + distance from same pair)
+Position? _bgPrevTickPosition;
 
 const String _eventTick = 'telemetry.tick';
 const String _eventError = 'telemetry.error';
@@ -25,6 +42,7 @@ const String _eventStopped = 'telemetry.stopped';
 const String _eventDebug = 'telemetry.debug';
 const String _eventStatus = 'telemetry.status';
 const String _eventStarted = 'telemetry.started';
+const String _eventHeartbeat = 'telemetry.heartbeat';
 
 Future<void> _appendCsvLine(String filePath, List<dynamic> row) async {
   final File file = File(filePath);
@@ -35,11 +53,16 @@ Map<String, dynamic>? _buildTickPayload({
   required DateTime now,
   required Position position,
   required double accelerationMs2,
+  required double smoothedSpeedKmh,
 }) {
   final Map<String, dynamic>? trip = _bgTrip;
   if (trip == null) {
     return null;
   }
+
+  // Filter altitude: replace out-of-range values with 0
+  final double rawAlt = position.altitude;
+  final double altitude = (rawAlt >= _altMin && rawAlt <= _altMax) ? rawAlt : 0;
 
   final DateTime startUtc = DateTime.parse(
     trip['start_time_utc'] as String,
@@ -49,18 +72,18 @@ Map<String, dynamic>? _buildTickPayload({
     'trip_id': trip['trip_id'],
     'latitude': position.latitude,
     'longitude': position.longitude,
-    'speed_kmh': position.speed * 3.6,
-    'altitude_m': position.altitude,
+    'speed_kmh': smoothedSpeedKmh,
+    'altitude_m': altitude,
     'acceleration_ms2': accelerationMs2,
     'start_soc': trip['start_soc'],
-    'end_soc': null,
+    'end_soc': trip['end_soc'] ?? '',
     'payload_kg': trip['payload_kg'],
     'effective_payload_kg':
       (trip['effective_payload_kg'] as num?)?.toDouble() ??
       (trip['payload_kg'] as num).toDouble(),
     'passenger_on': (trip['passenger_on'] as bool?) ?? false,
-    'ambient_temp_c': trip['ambient_temp_c'],
-    'weather_condition': trip['weather_condition'],
+    'ambient_temp_c': (trip['ambient_temp_c'] as num?)?.toDouble() ?? 0.0,
+    'weather_condition': (trip['weather_condition'] as String?) ?? 'unknown',
     'vehicle_type': trip['vehicle_type'],
     'sample_count': _bgSampleCount,
     'elapsed_sec': max(0, now.difference(startUtc).inSeconds),
@@ -88,7 +111,10 @@ Future<void> _stopTripInternals(ServiceInstance service) async {
 
   _bgLatestPosition = null;
   _bgPrevDistancePosition = null;
-  _bgLastSpeedMps = 0;
+  _bgLastGpsTimestamp = null;
+  _bgLastTickTimestamp = null;
+  _bgLastTickSpeedMps = 0;
+  _bgEmaSpeedKmh = 0;
 
   if (service is AndroidServiceInstance) {
     service.setForegroundNotificationInfo(
@@ -118,9 +144,11 @@ Future<void> _startTripInternals(
   _bgTrip = trip;
   _bgDistanceKm = 0;
   _bgSampleCount = 0;
-  _bgLastSpeedMps = 0;
   _bgPrevDistancePosition = null;
   _bgFirstFixEmitted = false;
+  _bgLastGpsTimestamp = null;
+  _bgLastTickTimestamp = null;
+  _bgEmaSpeedKmh = 0;
 
   if (service is AndroidServiceInstance) {
     service.setAsForegroundService();
@@ -139,6 +167,7 @@ Future<void> _startTripInternals(
     'received_at_utc': DateTime.now().toUtc().toIso8601String(),
   });
 
+  // GPS stream: only updates latest position, speed, distance — NO CSV write
   await _bgPositionSub?.cancel();
   _bgPositionSub =
       Geolocator.getPositionStream(
@@ -148,12 +177,28 @@ Future<void> _startTripInternals(
         ),
       ).listen(
         (Position position) {
+          final Map<String, dynamic>? currentTrip = _bgTrip;
+          if (currentTrip == null) {
+            return;
+          }
+
           if (!_bgFirstFixEmitted) {
             _bgFirstFixEmitted = true;
             _emitDebug(service, 'phase=first_fix');
           }
+
+          final DateTime now = DateTime.now().toUtc();
+
+          // Guard: skip if timestamp not strictly increasing
+          if (_bgLastGpsTimestamp != null && !now.isAfter(_bgLastGpsTimestamp!)) {
+            return;
+          }
+
+          // Distance calculation from previous distinct position
           final Position? prev = _bgPrevDistancePosition;
-          if (prev != null) {
+          if (prev != null &&
+              !(position.latitude == prev.latitude &&
+                position.longitude == prev.longitude)) {
             _bgDistanceKm +=
                 Geolocator.distanceBetween(
                   prev.latitude,
@@ -162,9 +207,13 @@ Future<void> _startTripInternals(
                   position.longitude,
                 ) /
                 1000;
+            _bgPrevDistancePosition = position;
+          } else if (prev == null) {
+            _bgPrevDistancePosition = position;
           }
-          _bgPrevDistancePosition = position;
+
           _bgLatestPosition = position;
+          _bgLastGpsTimestamp = now;
         },
         onError: (Object error) {
           _emitError(service, error);
@@ -177,29 +226,93 @@ Future<void> _startTripInternals(
     Geolocator.getLastKnownPosition().then((Position? position) {
       if (position != null && _bgLatestPosition == null) {
         _bgLatestPosition = position;
+        _bgPrevDistancePosition ??= position;
       }
     }),
   );
 
+  // 1-second timer: writes CSV + emits tick every second using latest GPS state
   _bgTickTimer?.cancel();
   _bgTickTimer = Timer.periodic(const Duration(seconds: 1), (_) async {
     final Map<String, dynamic>? currentTrip = _bgTrip;
+    if (currentTrip == null) {
+      return;
+    }
+
     final Position? position = _bgLatestPosition;
-    if (currentTrip == null || position == null) {
+    if (position == null) {
+      // No GPS fix yet — emit heartbeat only
+      final DateTime startUtc = DateTime.parse(
+        currentTrip['start_time_utc'] as String,
+      ).toUtc();
+      service.invoke(_eventHeartbeat, <String, dynamic>{
+        'elapsed_sec': max(0, DateTime.now().toUtc().difference(startUtc).inSeconds),
+        'sample_count': _bgSampleCount,
+        'distance_km': _bgDistanceKm,
+      });
       return;
     }
 
     final DateTime now = DateTime.now().toUtc();
-    final double acceleration = _bgSampleCount == 0
+
+    // ── Smoothed speed pipeline ──
+    // 1) GPS speed in km/h
+    final double gpsKmh = position.speed.isNaN || position.speed < 0
         ? 0
-        : (position.speed - _bgLastSpeedMps);
-    _bgLastSpeedMps = position.speed;
+        : position.speed * 3.6;
+
+    // 2) Segment speed from distance between previous and current tick position
+    double segmentKmh = 0;
+    double deltaSec = 0;
+    if (_bgLastTickTimestamp != null && _bgSampleCount > 0) {
+      deltaSec = now.difference(_bgLastTickTimestamp!).inMilliseconds / 1000.0;
+      if (deltaSec > 0 && _bgPrevDistancePosition != null) {
+        final double segDist = Geolocator.distanceBetween(
+          _bgPrevDistancePosition!.latitude,
+          _bgPrevDistancePosition!.longitude,
+          position.latitude,
+          position.longitude,
+        );
+        segmentKmh = (segDist / deltaSec) * 3.6;
+      }
+    }
+
+    // 3) Blended candidate: prefer GPS, fallback segment
+    double candidateKmh;
+    if (gpsKmh > 0) {
+      candidateKmh = 0.7 * gpsKmh + 0.3 * segmentKmh;
+    } else {
+      candidateKmh = segmentKmh;
+    }
+
+    // 4) EMA filter
+    if (_bgSampleCount == 0) {
+      _bgEmaSpeedKmh = candidateKmh;
+    } else {
+      _bgEmaSpeedKmh = _emaAlpha * candidateKmh + (1 - _emaAlpha) * _bgEmaSpeedKmh;
+    }
+
+    // 5) Deadband: suppress noise at low speed
+    final double smoothedSpeedKmh = _bgEmaSpeedKmh < _deadbandKmh ? 0 : _bgEmaSpeedKmh;
+
+    // ── Acceleration from smoothed speed ──
+    double acceleration = 0;
+    if (_bgLastTickTimestamp != null && _bgSampleCount > 0 && deltaSec > 0) {
+      final double currentSpeedMps = smoothedSpeedKmh / 3.6;
+      final double prevSpeedMps = _bgLastTickSpeedMps;
+      acceleration = (currentSpeedMps - prevSpeedMps) / deltaSec;
+      // Clamp to remove GPS spikes
+      acceleration = acceleration.clamp(_accelClampMin, _accelClampMax);
+    }
+    _bgLastTickSpeedMps = smoothedSpeedKmh / 3.6;
+    _bgLastTickTimestamp = now;
     _bgSampleCount += 1;
 
     final Map<String, dynamic>? payload = _buildTickPayload(
       now: now,
       position: position,
       accelerationMs2: acceleration,
+      smoothedSpeedKmh: smoothedSpeedKmh,
     );
 
     if (payload == null) {
@@ -207,25 +320,28 @@ Future<void> _startTripInternals(
     }
 
     try {
-      await _appendCsvLine(currentTrip['temp_csv_path'] as String, <dynamic>[
-        payload['timestamp'],
-        payload['trip_id'],
-        payload['latitude'],
-        payload['longitude'],
-        payload['speed_kmh'],
-        payload['altitude_m'],
-        payload['acceleration_ms2'],
-        payload['start_soc'],
-        '',
-        payload['payload_kg'],
-        payload['ambient_temp_c'] ?? '',
-        payload['weather_condition'],
-      ]);
+      await _appendCsvLine(
+        currentTrip['temp_csv_path'] as String,
+        <dynamic>[
+          payload['timestamp'],
+          payload['trip_id'],
+          payload['latitude'],
+          payload['longitude'],
+          payload['speed_kmh'],
+          payload['altitude_m'],
+          payload['acceleration_ms2'],
+          payload['start_soc'],
+          payload['end_soc'],
+          payload['payload_kg'],
+          payload['ambient_temp_c'],
+          payload['weather_condition'],
+        ],
+      );
       service.invoke(_eventTick, payload);
       if (_bgSampleCount % 20 == 0) {
         _emitDebug(
           service,
-          'Tick sample=$_bgSampleCount speed=${(payload['speed_kmh'] as num).toStringAsFixed(1)} km/h',
+          'Sample=$_bgSampleCount speed=${smoothedSpeedKmh.toStringAsFixed(1)} km/h dist=${_bgDistanceKm.toStringAsFixed(3)}km',
         );
       }
     } catch (error) {
@@ -273,6 +389,7 @@ Future<void> backgroundServiceEntryPoint(ServiceInstance service) async {
       now: DateTime.now().toUtc(),
       position: position,
       accelerationMs2: 0,
+      smoothedSpeedKmh: _bgEmaSpeedKmh < _deadbandKmh ? 0 : _bgEmaSpeedKmh,
     );
     if (payload != null) {
       service.invoke(_eventTick, payload);
@@ -387,6 +504,7 @@ class BackgroundTrackingService {
         _eventStopped,
         _eventDebug,
         _eventStarted,
+        _eventHeartbeat,
       ]) {
         subscriptions.add(
           _service.on(key).listen((dynamic event) {

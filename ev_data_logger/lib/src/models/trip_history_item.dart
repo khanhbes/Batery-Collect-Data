@@ -1,3 +1,4 @@
+import '../utils/type_helpers.dart';
 import 'route_point.dart';
 
 class TripHistoryItem {
@@ -26,6 +27,7 @@ class TripHistoryItem {
     required this.ambientTempC,
     required this.weatherCondition,
     required this.routePreview,
+    this.rawDataPath,
   });
 
   static const List<String> masterHeader = <String>[
@@ -78,6 +80,7 @@ class TripHistoryItem {
   final double? ambientTempC;
   final String weatherCondition;
   final List<RoutePoint> routePreview;
+  final String? rawDataPath;
 
   List<dynamic> toMasterCsvRow() {
     return <dynamic>[
@@ -133,42 +136,44 @@ class TripHistoryItem {
       'ambientTempC': ambientTempC,
       'weatherCondition': weatherCondition,
       'routePreview': routePreview.map((RoutePoint e) => e.toJson()).toList(),
+      'rawDataPath': rawDataPath,
     };
   }
 
   factory TripHistoryItem.fromJson(Map<String, dynamic> json) {
     final List<dynamic> routeRaw =
         (json['routePreview'] as List<dynamic>?) ?? <dynamic>[];
+    final int startSoc = toIntLoose(json['startSoc']) ?? 0;
+    final int endSoc = toIntLoose(json['endSoc']) ?? 0;
     return TripHistoryItem(
-      tripId: json['tripId'] as String,
-      vehicleType: (json['vehicleType'] as String?) ?? 'Electric Vehicle',
-      startTimeUtc: DateTime.parse(json['startTimeUtc'] as String).toUtc(),
-      endTimeUtc: DateTime.parse(json['endTimeUtc'] as String).toUtc(),
-      durationSec: json['durationSec'] as int,
-      startSoc: json['startSoc'] as int,
-      endSoc: json['endSoc'] as int,
-      socDelta:
-          (json['socDelta'] as num?)?.toInt() ??
-          ((json['startSoc'] as int) - (json['endSoc'] as int)),
-      payloadKg: (json['payloadKg'] as num).toDouble(),
-      sampleCount: (json['sampleCount'] as num?)?.toInt() ?? 0,
-      totalDistanceKm: (json['totalDistanceKm'] as num).toDouble(),
-      avgSpeedKmh: (json['avgSpeedKmh'] as num?)?.toDouble() ?? 0,
-      maxSpeedKmh: (json['maxSpeedKmh'] as num?)?.toDouble() ?? 0,
-      avgAccelerationMs2: (json['avgAccelerationMs2'] as num?)?.toDouble() ?? 0,
-      maxAccelerationMs2: (json['maxAccelerationMs2'] as num?)?.toDouble() ?? 0,
-      minAltitudeM: (json['minAltitudeM'] as num?)?.toDouble() ?? 0,
-      maxAltitudeM: (json['maxAltitudeM'] as num?)?.toDouble() ?? 0,
-      startLatitude: (json['startLatitude'] as num?)?.toDouble() ?? 0,
-      startLongitude: (json['startLongitude'] as num?)?.toDouble() ?? 0,
-      endLatitude: (json['endLatitude'] as num?)?.toDouble() ?? 0,
-      endLongitude: (json['endLongitude'] as num?)?.toDouble() ?? 0,
-      ambientTempC: (json['ambientTempC'] as num?)?.toDouble(),
-      weatherCondition: (json['weatherCondition'] as String?) ?? 'unknown',
+      tripId: toStringLoose(json['tripId']),
+      vehicleType: toStringLoose(json['vehicleType'], fallback: 'Electric Vehicle'),
+      startTimeUtc: DateTime.parse(toStringLoose(json['startTimeUtc'])).toUtc(),
+      endTimeUtc: DateTime.parse(toStringLoose(json['endTimeUtc'])).toUtc(),
+      durationSec: toIntLoose(json['durationSec']) ?? 0,
+      startSoc: startSoc,
+      endSoc: endSoc,
+      socDelta: toIntLoose(json['socDelta']) ?? (startSoc - endSoc),
+      payloadKg: toDoubleLoose(json['payloadKg']) ?? 0,
+      sampleCount: toIntLoose(json['sampleCount']) ?? 0,
+      totalDistanceKm: toDoubleLoose(json['totalDistanceKm']) ?? 0,
+      avgSpeedKmh: toDoubleLoose(json['avgSpeedKmh']) ?? 0,
+      maxSpeedKmh: toDoubleLoose(json['maxSpeedKmh']) ?? 0,
+      avgAccelerationMs2: toDoubleLoose(json['avgAccelerationMs2']) ?? 0,
+      maxAccelerationMs2: toDoubleLoose(json['maxAccelerationMs2']) ?? 0,
+      minAltitudeM: toDoubleLoose(json['minAltitudeM']) ?? 0,
+      maxAltitudeM: toDoubleLoose(json['maxAltitudeM']) ?? 0,
+      startLatitude: toDoubleLoose(json['startLatitude']) ?? 0,
+      startLongitude: toDoubleLoose(json['startLongitude']) ?? 0,
+      endLatitude: toDoubleLoose(json['endLatitude']) ?? 0,
+      endLongitude: toDoubleLoose(json['endLongitude']) ?? 0,
+      ambientTempC: toDoubleLoose(json['ambientTempC']),
+      weatherCondition: toStringLoose(json['weatherCondition'], fallback: 'unknown'),
       routePreview: routeRaw
           .whereType<Map>()
           .map((Map e) => RoutePoint.fromJson(Map<String, dynamic>.from(e)))
           .toList(),
+      rawDataPath: json['rawDataPath'] as String?,
     );
   }
 }

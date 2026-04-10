@@ -17,5 +17,5 @@ const String chargingWebhookUrl = String.fromEnvironment(
 
 const String driveWebhookApiKey = String.fromEnvironment(
   'DRIVE_WEBHOOK_API_KEY',
-  defaultValue: '',
+  defaultValue: '4d7f6a2c9b1e43f8a5d0c2e7b9f1a6c34e8d2b7a5c1f9d6e0b3a7c2d8e4f1a9',
 );

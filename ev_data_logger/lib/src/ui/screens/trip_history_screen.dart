@@ -31,32 +31,72 @@ class TripHistoryScreen extends ConsumerWidget {
               itemBuilder: (BuildContext context, int index) {
                 final TripHistoryItem item = items[index];
 
-                return Card(
-                  child: ListTile(
-                    title: Text('Trip ${item.tripId}'),
-                    subtitle: Text(
-                      '${DateFormat('yyyy-MM-dd HH:mm:ss').format(item.startTimeUtc.toLocal())}\n'
-                      'SoC ${item.startSoc}% -> ${item.endSoc}% | Distance ${item.totalDistanceKm.toStringAsFixed(2)} km\n'
-                      'Avg ${item.avgSpeedKmh.toStringAsFixed(1)} km/h | Max ${item.maxSpeedKmh.toStringAsFixed(1)} km/h',
-                    ),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute<void>(
-                          builder: (_) => TripDetailScreen(item: item),
+                return Dismissible(
+                  key: Key(item.tripId),
+                  direction: DismissDirection.endToStart,
+                  background: Container(
+                    alignment: Alignment.centerRight,
+                    padding: const EdgeInsets.only(right: 20),
+                    color: Colors.red,
+                    child: const Icon(Icons.delete, color: Colors.white),
+                  ),
+                  confirmDismiss: (_) async {
+                    return await showDialog<bool>(
+                      context: context,
+                      builder: (BuildContext ctx) => AlertDialog(
+                        title: const Text('Delete Trip'),
+                        content: Text(
+                          'Delete trip ${item.tripId}?\nThis will also remove data from the Google Sheet.',
                         ),
-                      );
-                    },
-                    onLongPress: () async {
-                      final String path = await ref
-                          .read(tripControllerProvider.notifier)
-                          .masterCsvPath();
-                      if (await File(path).exists()) {
-                        await SharePlus.instance.share(
-                          ShareParams(files: <XFile>[XFile(path)]),
+                        actions: <Widget>[
+                          TextButton(
+                            onPressed: () => Navigator.of(ctx).pop(false),
+                            child: const Text('Cancel'),
+                          ),
+                          TextButton(
+                            onPressed: () => Navigator.of(ctx).pop(true),
+                            child: const Text(
+                              'Delete',
+                              style: TextStyle(color: Colors.red),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ) ?? false;
+                  },
+                  onDismissed: (_) async {
+                    await ref
+                        .read(tripControllerProvider.notifier)
+                        .deleteTrip(item.tripId);
+                    ref.invalidate(tripHistoryProvider);
+                  },
+                  child: Card(
+                    child: ListTile(
+                      title: Text('Trip ${item.tripId}'),
+                      subtitle: Text(
+                        '${DateFormat('yyyy-MM-dd HH:mm:ss').format(item.startTimeUtc.toLocal())}\n'
+                        'SoC ${item.startSoc}% -> ${item.endSoc}% | Distance ${item.totalDistanceKm.toStringAsFixed(2)} km\n'
+                        'Avg ${item.avgSpeedKmh.toStringAsFixed(1)} km/h | Max ${item.maxSpeedKmh.toStringAsFixed(1)} km/h',
+                      ),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => TripDetailScreen(item: item),
+                          ),
                         );
-                      }
-                    },
+                      },
+                      onLongPress: () async {
+                        final String path = await ref
+                            .read(tripControllerProvider.notifier)
+                            .masterCsvPath();
+                        if (await File(path).exists()) {
+                          await SharePlus.instance.share(
+                            ShareParams(files: <XFile>[XFile(path)]),
+                          );
+                        }
+                      },
+                    ),
                   ),
                 );
               },

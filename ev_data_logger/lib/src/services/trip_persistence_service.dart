@@ -94,6 +94,17 @@ class TripPersistenceService {
     );
   }
 
+  Future<void> deleteHistoryItem(String tripId) async {
+    final List<TripHistoryItem> existing = await loadHistory();
+    final List<TripHistoryItem> updated = existing
+        .where((TripHistoryItem e) => e.tripId != tripId)
+        .toList();
+    final File file = await _historyIndexFile();
+    await file.writeAsString(
+      jsonEncode(updated.map((TripHistoryItem e) => e.toJson()).toList()),
+    );
+  }
+
   Future<void> saveActiveCharging(ChargingSessionItem session) async {
     final File file = await _activeChargingFile();
     await file.writeAsString(jsonEncode(session.toJson()));

@@ -40,6 +40,20 @@ if (-not $NoVersionBump) {
 
 Push-Location $ProjectDir
 try {
+    Write-Host "Dang flutter clean..."
+    flutter clean
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "flutter clean that bai voi exit code: $LASTEXITCODE"
+    }
+
+    Write-Host "Dang flutter pub get..."
+    flutter pub get
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "flutter pub get that bai voi exit code: $LASTEXITCODE"
+    }
+
     $buildArgs = @(
         "build",
         "apk",

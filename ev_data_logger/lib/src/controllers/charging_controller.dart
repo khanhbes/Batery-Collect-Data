@@ -89,6 +89,22 @@ class ChargingController extends Notifier<ChargingState> {
         chargingLogCsvPath: path,
         clearChargingErrorMessage: true,
       );
+
+      // ── Phase 1: enqueue charging Start record (end fields empty) ──
+      unawaited(
+        _driveSyncService.enqueueCharging(<String, dynamic>{
+          'charge_id': session.chargeId,
+          'start_timestamp_utc': session.startTimestampUtc.toIso8601String(),
+          'end_timestamp_utc': '',
+          'start_soc': session.startSoc,
+          'end_soc': '',
+          'delta_soc': '',
+          'duration_sec': '',
+          'latitude': session.latitude,
+          'longitude': session.longitude,
+          'ambient_temp_c': session.ambientTempC,
+        }),
+      );
     } catch (error) {
       state = state.copyWith(chargingErrorMessage: error.toString());
       rethrow;
@@ -120,7 +136,10 @@ class ChargingController extends Notifier<ChargingState> {
           completed.endTimestampUtc?.difference(completed.startTimestampUtc).inSeconds ??
           0;
       final file = await _csvService.appendChargingSummary(completed);
-      await _persistenceService.appendChargingHistory(completed);
+      final ChargingSessionItem withPath = completed.copyWith(
+        rawDataPath: file.path,
+      );
+      await _persistenceService.appendChargingHistory(withPath);
       await _persistenceService.clearActiveCharging();
       unawaited(
         _driveSyncService.enqueueCharging(<String, dynamic>{
@@ -140,7 +159,7 @@ class ChargingController extends Notifier<ChargingState> {
       state = state.copyWith(
         clearActiveChargingSession: true,
         chargingHistory: <ChargingSessionItem>[
-          completed,
+          withPath,
           ...state.chargingHistory,
         ],
         chargingLogCsvPath: file.path,

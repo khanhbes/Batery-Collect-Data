@@ -1,5 +1,8 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../models/trip_history_item.dart';
 import '../widgets/route_line_view.dart';
@@ -74,6 +77,26 @@ class TripDetailScreen extends StatelessWidget {
               item.ambientTempC?.toStringAsFixed(1) ?? '-',
             ),
             _metric('Weather', item.weatherCondition),
+            if (item.rawDataPath != null) ...<Widget>[
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: () async {
+                    final File f = File(item.rawDataPath!);
+                    if (await f.exists()) {
+                      await SharePlus.instance.share(
+                        ShareParams(
+                          files: <XFile>[XFile(item.rawDataPath!)],
+                        ),
+                      );
+                    }
+                  },
+                  icon: const Icon(Icons.ios_share),
+                  label: const Text('Share Raw Trip CSV'),
+                ),
+              ),
+            ],
           ],
         ),
       ),

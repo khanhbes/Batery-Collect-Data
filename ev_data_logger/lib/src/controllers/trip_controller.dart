@@ -45,12 +45,20 @@ class TripController extends Notifier<TripState> {
     _syncStatusSub?.cancel();
     _syncStatusSub = _driveSyncService.statusStream.listen((SyncStatus s) {
       state = state.copyWith(
-        syncPendingCount: s.pendingCount,
-        syncInProgress: s.isFlushing,
-        syncLastSuccessUtc: s.lastSuccessUtc,
-        clearSyncLastSuccessUtc: s.lastSuccessUtc == null,
-        syncLastError: s.lastError,
-        clearSyncLastError: s.lastError == null,
+        movementPendingCount: s.movement.pendingCount,
+        movementSyncInProgress: s.movement.isFlushing,
+        movementSyncPaused: s.movement.isPaused,
+        movementLastSuccessUtc: s.movement.lastSuccessUtc,
+        clearMovementLastSuccessUtc: s.movement.lastSuccessUtc == null,
+        movementLastError: s.movement.lastError,
+        clearMovementLastError: s.movement.lastError == null,
+        chargingPendingCount: s.charging.pendingCount,
+        chargingSyncInProgress: s.charging.isFlushing,
+        chargingSyncPaused: s.charging.isPaused,
+        chargingLastSuccessUtc: s.charging.lastSuccessUtc,
+        clearChargingLastSuccessUtc: s.charging.lastSuccessUtc == null,
+        chargingLastError: s.charging.lastError,
+        clearChargingLastError: s.charging.lastError == null,
       );
     });
     final SyncStatus initialSync = _driveSyncService.status;
@@ -61,10 +69,16 @@ class TripController extends Notifier<TripState> {
     });
 
     return TripState.initial().copyWith(
-      syncPendingCount: initialSync.pendingCount,
-      syncInProgress: initialSync.isFlushing,
-      syncLastSuccessUtc: initialSync.lastSuccessUtc,
-      syncLastError: initialSync.lastError,
+      movementPendingCount: initialSync.movement.pendingCount,
+      movementSyncInProgress: initialSync.movement.isFlushing,
+      movementSyncPaused: initialSync.movement.isPaused,
+      movementLastSuccessUtc: initialSync.movement.lastSuccessUtc,
+      movementLastError: initialSync.movement.lastError,
+      chargingPendingCount: initialSync.charging.pendingCount,
+      chargingSyncInProgress: initialSync.charging.isFlushing,
+      chargingSyncPaused: initialSync.charging.isPaused,
+      chargingLastSuccessUtc: initialSync.charging.lastSuccessUtc,
+      chargingLastError: initialSync.charging.lastError,
     );
   }
 
@@ -126,6 +140,29 @@ class TripController extends Notifier<TripState> {
     _listenTelemetry();
     await _backgroundService.startTrip(session);
     await _backgroundService.syncTripState();
+
+    // ── Seed movement record: enqueue sample_count=0 immediately at Start ──
+    unawaited(
+      _driveSyncService.enqueueMovement(<String, dynamic>{
+        'trip_id': session.tripId,
+        'timestamp_utc': now.toIso8601String(),
+        'elapsed_sec': 0,
+        'sample_count': 0,
+        'speed_kmh': 0,
+        'accel_ms2': 0,
+        'distance_km': 0,
+        'latitude': seedPosition?.latitude ?? 0,
+        'longitude': seedPosition?.longitude ?? 0,
+        'altitude_m': seedPosition?.altitude ?? 0,
+        'start_soc': startSoc,
+        'end_soc': '',
+        'payload_kg': payloadKg,
+        'effective_payload_kg': payloadKg,
+        'passenger_on': false,
+        'ambient_temp_c': 0.0,
+        'weather_condition': 'unknown',
+      }),
+    );
 
     unawaited(_enrichWeatherAsync(session, seedPosition: seedPosition));
   }
@@ -239,18 +276,34 @@ class TripController extends Notifier<TripState> {
 
     final DateTime endedUtc = DateTime.now().toUtc();
     final int durationSec = endedUtc.difference(session.startTimeUtc).inSeconds;
-    final int sampleCount =
-        (stopPayload['sample_count'] as num?)?.toInt() ?? state.sampleCount;
-    final double totalDistanceKm =
-        (stopPayload['distance_km'] as num?)?.toDouble() ??
-        state.totalDistanceKm;
 
     final _TempTripStats tempStats = await _readTempTripStats(
       session.tempCsvPath,
     );
+
+    // Priority: stopPayload (if valid) > state > csv-derived
+    final int stopSamples = (stopPayload['sample_count'] as num?)?.toInt() ?? 0;
+    final int stateSamples = state.sampleCount;
+    final int csvSamples = tempStats.sampleCountFromCsv;
+    final int sampleCount = stopSamples > 0
+        ? stopSamples
+        : (stateSamples > 0 ? stateSamples : csvSamples);
+
+    final double stopDist = (stopPayload['distance_km'] as num?)?.toDouble() ?? 0;
+    final double stateDist = state.totalDistanceKm;
+    final double csvDist = tempStats.distanceKmFromRoute;
+    final double totalDistanceKm = stopDist > 0
+        ? stopDist
+        : (stateDist > 0 ? stateDist : csvDist);
     final List<RoutePoint> routePreview = _downsampleRoute(
       tempStats.routePoints,
       maxPoints: 140,
+    );
+
+    // Move temp CSV to permanent raw path instead of deleting
+    final String? rawDataPath = await _csvService.moveToRawPath(
+      session.tempCsvPath,
+      session.tripId,
     );
 
     final TripHistoryItem summary = TripHistoryItem(
@@ -278,13 +331,13 @@ class TripController extends Notifier<TripState> {
       ambientTempC: session.ambientTempC,
       weatherCondition: session.weatherCondition,
       routePreview: routePreview,
+      rawDataPath: rawDataPath,
     );
 
     final File masterFile = await _csvService.appendTripSummary(summary);
 
     await _persistenceService.appendHistory(summary);
 
-    await _csvService.deleteTempFile(session.tempCsvPath);
     await _persistenceService.clearActiveTrip();
 
     state = state.copyWith(
@@ -321,6 +374,32 @@ class TripController extends Notifier<TripState> {
   Future<List<TripHistoryItem>> loadHistory() {
     return _persistenceService.loadHistory();
   }
+
+  Future<void> deleteTrip(String tripId) async {
+    final List<TripHistoryItem> history = await _persistenceService.loadHistory();
+    final TripHistoryItem? item = history.cast<TripHistoryItem?>().firstWhere(
+      (TripHistoryItem? e) => e?.tripId == tripId,
+      orElse: () => null,
+    );
+
+    // Delete local raw CSV file
+    if (item?.rawDataPath != null) {
+      await _csvService.deleteRawFile(item!.rawDataPath!);
+    }
+
+    // Remove from local history JSON
+    await _persistenceService.deleteHistoryItem(tripId);
+
+    // Enqueue delete command to sync with Google Sheet
+    unawaited(_driveSyncService.enqueueDelete(tripId));
+  }
+
+  void pauseMovementSync() => _driveSyncService.pauseMovement();
+  void resumeMovementSync() => _driveSyncService.resumeMovement();
+  Future<void> retryMovementSync() => _driveSyncService.retryMovementNow();
+  void pauseChargingSync() => _driveSyncService.pauseCharging();
+  void resumeChargingSync() => _driveSyncService.resumeCharging();
+  Future<void> retryChargingSync() => _driveSyncService.retryChargingNow();
 
   void _listenTelemetry() {
     _telemetrySub?.cancel();
@@ -361,8 +440,10 @@ class TripController extends Notifier<TripState> {
           clearErrorMessage: true,
         );
 
+        // Throttle movement sync: enqueue every 5 samples to avoid flooding Google Sheets.
+        // CSV still records every 1s tick.
         final TripSession? session = state.session;
-        if (session != null) {
+        if (session != null && telemetry.sampleCount % 5 == 0) {
           unawaited(
             _driveSyncService.enqueueMovement(<String, dynamic>{
               'trip_id': session.tripId,
@@ -376,10 +457,11 @@ class TripController extends Notifier<TripState> {
               'longitude': telemetry.longitude,
               'altitude_m': telemetry.altitudeM,
               'start_soc': telemetry.startSoc,
+              'end_soc': telemetry.endSoc ?? '',
               'payload_kg': telemetry.payloadKg,
               'effective_payload_kg': telemetry.effectivePayloadKg,
               'passenger_on': telemetry.passengerOn,
-              'ambient_temp_c': telemetry.ambientTempC,
+              'ambient_temp_c': telemetry.ambientTempC ?? 0.0,
               'weather_condition': telemetry.weatherCondition,
             }),
           );
@@ -404,6 +486,18 @@ class TripController extends Notifier<TripState> {
       if (type == 'telemetry.started') {
         final String tripId = (event['trip_id'] as String?) ?? 'unknown';
         _appendDebug('Background ACK start received for $tripId');
+        return;
+      }
+
+      if (type == 'telemetry.heartbeat') {
+        final int elapsedSec = (event['elapsed_sec'] as num?)?.toInt() ?? 0;
+        final int samples = (event['sample_count'] as num?)?.toInt() ?? state.sampleCount;
+        final double distKm = (event['distance_km'] as num?)?.toDouble() ?? state.totalDistanceKm;
+        state = state.copyWith(
+          elapsed: Duration(seconds: elapsedSec),
+          sampleCount: samples,
+          totalDistanceKm: distKm,
+        );
         return;
       }
 
@@ -479,6 +573,7 @@ class TripController extends Notifier<TripState> {
     double? minAlt;
     double? maxAlt;
     final List<RoutePoint> route = <RoutePoint>[];
+    double routeDistanceKm = 0;
 
     await for (final String line
         in tempFile
@@ -502,6 +597,15 @@ class TripController extends Notifier<TripState> {
       final double acc = double.tryParse(cols[6]) ?? 0;
 
       if (lat != null && lon != null) {
+        // Calculate distance from previous point
+        if (route.isNotEmpty) {
+          final RoutePoint prev = route.last;
+          if (!(lat == prev.latitude && lon == prev.longitude)) {
+            routeDistanceKm += Geolocator.distanceBetween(
+              prev.latitude, prev.longitude, lat, lon,
+            ) / 1000;
+          }
+        }
         route.add(RoutePoint(latitude: lat, longitude: lon));
       }
 
@@ -515,8 +619,11 @@ class TripController extends Notifier<TripState> {
         maxAcc = acc;
       }
 
-      minAlt = minAlt == null ? alt : min(minAlt, alt);
-      maxAlt = maxAlt == null ? alt : max(maxAlt, alt);
+      // Filter altitude for summary: only consider valid range
+      if (alt >= -100 && alt <= 2000) {
+        minAlt = minAlt == null ? alt : min(minAlt, alt);
+        maxAlt = maxAlt == null ? alt : max(maxAlt, alt);
+      }
       count += 1;
     }
 
@@ -538,6 +645,8 @@ class TripController extends Notifier<TripState> {
       endLatitude: end.latitude,
       endLongitude: end.longitude,
       routePoints: route,
+      sampleCountFromCsv: count,
+      distanceKmFromRoute: routeDistanceKm,
     );
   }
 
@@ -579,6 +688,8 @@ class _TempTripStats {
     required this.endLatitude,
     required this.endLongitude,
     required this.routePoints,
+    required this.sampleCountFromCsv,
+    required this.distanceKmFromRoute,
   });
 
   factory _TempTripStats.empty() {
@@ -594,6 +705,8 @@ class _TempTripStats {
       endLatitude: 0,
       endLongitude: 0,
       routePoints: <RoutePoint>[],
+      sampleCountFromCsv: 0,
+      distanceKmFromRoute: 0,
     );
   }
 
@@ -608,4 +721,6 @@ class _TempTripStats {
   final double endLatitude;
   final double endLongitude;
   final List<RoutePoint> routePoints;
+  final int sampleCountFromCsv;
+  final double distanceKmFromRoute;
 }
