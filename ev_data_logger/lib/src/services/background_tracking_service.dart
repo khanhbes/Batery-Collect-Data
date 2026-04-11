@@ -54,6 +54,8 @@ Map<String, dynamic>? _buildTickPayload({
   required Position position,
   required double accelerationMs2,
   required double smoothedSpeedKmh,
+  double gpsAccuracyM = 0,
+  double segmentDistanceM = 0,
 }) {
   final Map<String, dynamic>? trip = _bgTrip;
   if (trip == null) {
@@ -88,6 +90,8 @@ Map<String, dynamic>? _buildTickPayload({
     'sample_count': _bgSampleCount,
     'elapsed_sec': max(0, now.difference(startUtc).inSeconds),
     'distance_km': _bgDistanceKm,
+    'gps_accuracy_m': gpsAccuracyM,
+    'segment_distance_m': segmentDistanceM,
   };
 }
 
@@ -115,6 +119,7 @@ Future<void> _stopTripInternals(ServiceInstance service) async {
   _bgLastTickTimestamp = null;
   _bgLastTickSpeedMps = 0;
   _bgEmaSpeedKmh = 0;
+  _bgPrevTickPosition = null;
 
   if (service is AndroidServiceInstance) {
     service.setForegroundNotificationInfo(
@@ -149,6 +154,7 @@ Future<void> _startTripInternals(
   _bgLastGpsTimestamp = null;
   _bgLastTickTimestamp = null;
   _bgEmaSpeedKmh = 0;
+  _bgPrevTickPosition = null;
 
   if (service is AndroidServiceInstance) {
     service.setAsForegroundService();
@@ -194,24 +200,9 @@ Future<void> _startTripInternals(
             return;
           }
 
-          // Distance calculation from previous distinct position
-          final Position? prev = _bgPrevDistancePosition;
-          if (prev != null &&
-              !(position.latitude == prev.latitude &&
-                position.longitude == prev.longitude)) {
-            _bgDistanceKm +=
-                Geolocator.distanceBetween(
-                  prev.latitude,
-                  prev.longitude,
-                  position.latitude,
-                  position.longitude,
-                ) /
-                1000;
-            _bgPrevDistancePosition = position;
-          } else if (prev == null) {
-            _bgPrevDistancePosition = position;
-          }
-
+          // Only store latest position; distance is computed in the tick timer
+          // from the same pair of points used for speed (unified kinematics).
+          _bgPrevDistancePosition ??= position;
           _bgLatestPosition = position;
           _bgLastGpsTimestamp = now;
         },
@@ -254,46 +245,63 @@ Future<void> _startTripInternals(
     }
 
     final DateTime now = DateTime.now().toUtc();
+    final double gpsAccuracy = position.accuracy;
 
-    // ── Smoothed speed pipeline ──
-    // 1) GPS speed in km/h
+    // ── Unified kinematics: speed + distance from the SAME segment ──
+    double segmentDistM = 0;
+    double segmentKmh = 0;
+    double deltaSec = 0;
+    if (_bgLastTickTimestamp != null && _bgSampleCount > 0 && _bgPrevTickPosition != null) {
+      deltaSec = now.difference(_bgLastTickTimestamp!).inMilliseconds / 1000.0;
+      // Only compute segment if GPS accuracy is reasonable (< 20m)
+      // Poor accuracy means position is unreliable → segment would be jitter
+      if (deltaSec > 0 && gpsAccuracy < 20) {
+        segmentDistM = Geolocator.distanceBetween(
+          _bgPrevTickPosition!.latitude,
+          _bgPrevTickPosition!.longitude,
+          position.latitude,
+          position.longitude,
+        );
+        segmentKmh = (segmentDistM / deltaSec) * 3.6;
+      }
+    }
+
+    // 1) GPS Doppler speed in km/h — more accurate than position-derived speed
     final double gpsKmh = position.speed.isNaN || position.speed < 0
         ? 0
         : position.speed * 3.6;
 
-    // 2) Segment speed from distance between previous and current tick position
-    double segmentKmh = 0;
-    double deltaSec = 0;
-    if (_bgLastTickTimestamp != null && _bgSampleCount > 0) {
-      deltaSec = now.difference(_bgLastTickTimestamp!).inMilliseconds / 1000.0;
-      if (deltaSec > 0 && _bgPrevDistancePosition != null) {
-        final double segDist = Geolocator.distanceBetween(
-          _bgPrevDistancePosition!.latitude,
-          _bgPrevDistancePosition!.longitude,
-          position.latitude,
-          position.longitude,
-        );
-        segmentKmh = (segDist / deltaSec) * 3.6;
-      }
-    }
-
-    // 3) Blended candidate: prefer GPS, fallback segment
+    // 2) Candidate speed: GPS Doppler is primary truth.
+    //    Position-derived segment speed is noisy (GPS jitter ~5-15m)
+    //    and must NOT be used as fallback when GPS says stationary.
     double candidateKmh;
-    if (gpsKmh > 0) {
+    if (gpsKmh >= _deadbandKmh) {
+      // GPS confirms real movement — blend for smoothness
       candidateKmh = 0.7 * gpsKmh + 0.3 * segmentKmh;
+    } else if (gpsKmh > 0 && segmentDistM >= _minSegmentM) {
+      // GPS shows small movement, segment confirms — use GPS only
+      candidateKmh = gpsKmh;
     } else {
-      candidateKmh = segmentKmh;
+      // GPS says stationary (speed=0) — trust it, ignore segment jitter
+      candidateKmh = 0;
     }
 
-    // 4) EMA filter
+    // 3) EMA filter
     if (_bgSampleCount == 0) {
       _bgEmaSpeedKmh = candidateKmh;
     } else {
       _bgEmaSpeedKmh = _emaAlpha * candidateKmh + (1 - _emaAlpha) * _bgEmaSpeedKmh;
     }
 
-    // 5) Deadband: suppress noise at low speed
+    // 4) Deadband: suppress noise at low speed
     final double smoothedSpeedKmh = _bgEmaSpeedKmh < _deadbandKmh ? 0 : _bgEmaSpeedKmh;
+
+    // 5) Distance accumulation — consistency guard:
+    //    Only add distance when moving (speed >= deadband) AND segment >= minSegmentM.
+    //    If speed is 0, distance does NOT increase (fixes drift while stationary).
+    if (smoothedSpeedKmh > 0 && segmentDistM >= _minSegmentM) {
+      _bgDistanceKm += segmentDistM / 1000;
+    }
 
     // ── Acceleration from smoothed speed ──
     double acceleration = 0;
@@ -306,6 +314,7 @@ Future<void> _startTripInternals(
     }
     _bgLastTickSpeedMps = smoothedSpeedKmh / 3.6;
     _bgLastTickTimestamp = now;
+    _bgPrevTickPosition = position;
     _bgSampleCount += 1;
 
     final Map<String, dynamic>? payload = _buildTickPayload(
@@ -313,6 +322,8 @@ Future<void> _startTripInternals(
       position: position,
       accelerationMs2: acceleration,
       smoothedSpeedKmh: smoothedSpeedKmh,
+      gpsAccuracyM: gpsAccuracy,
+      segmentDistanceM: segmentDistM,
     );
 
     if (payload == null) {
@@ -341,7 +352,7 @@ Future<void> _startTripInternals(
       if (_bgSampleCount % 20 == 0) {
         _emitDebug(
           service,
-          'Sample=$_bgSampleCount speed=${smoothedSpeedKmh.toStringAsFixed(1)} km/h dist=${_bgDistanceKm.toStringAsFixed(3)}km',
+          'Sample=$_bgSampleCount speed=${smoothedSpeedKmh.toStringAsFixed(1)} km/h dist=${_bgDistanceKm.toStringAsFixed(3)}km acc=${gpsAccuracy.toStringAsFixed(1)}m',
         );
       }
     } catch (error) {

@@ -22,7 +22,12 @@ const CHARGING_HEADERS = [
 ];
 
 function doGet(e) {
-  return jsonResponse({ status: "ok", message: "EV Logger webhook is running" });
+  return jsonResponse({
+    status: "ok",
+    version: "2.1",
+    message: "EV Logger webhook is running",
+    targets: ["movement", "charging", "delete_movement"]
+  });
 }
 
 function doPost(e) {

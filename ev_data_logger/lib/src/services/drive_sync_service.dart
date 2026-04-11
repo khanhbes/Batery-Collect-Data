@@ -115,7 +115,8 @@ class DriveSyncService {
   }
 
   void _validateWebhookUrl(String url, String target) {
-    if (url.isEmpty) {
+    final String trimmed = url.trim();
+    if (trimmed.isEmpty) {
       if (target == 'movement') {
         _movementLastError = 'Webhook URL for movement is empty';
       } else {
@@ -123,10 +124,16 @@ class DriveSyncService {
       }
       return;
     }
-    
-    if (!url.contains('script.google.com/macros') || !url.contains('/exec')) {
+
+    // Strict check: must be Google Apps Script Web App /exec URL
+    final Uri? parsed = Uri.tryParse(trimmed);
+    if (parsed == null ||
+        !parsed.host.endsWith('script.google.com') ||
+        !parsed.path.contains('/macros/') ||
+        !parsed.path.endsWith('/exec')) {
       final String msg =
-          'Invalid $target webhook URL. Must be Google Apps Script Web App (/exec)';
+          'Invalid $target webhook URL. Must be Google Apps Script Web App '
+          '(https://script.google.com/macros/s/.../exec)';
       if (target == 'movement') {
         _movementLastError = msg;
       } else {
@@ -134,6 +141,71 @@ class DriveSyncService {
       }
       throw Exception(msg);
     }
+  }
+
+  /// Preflight check: GET the webhook URL and verify a valid JSON health
+  /// response is returned. Returns true if the webhook is reachable and
+  /// returns JSON with `status: "ok"`. On failure, sets the appropriate
+  /// error and auto-pauses the target queue.
+  Future<bool> _preflightCheck(String webhookUrl, String target) async {
+    try {
+      final Uri uri = Uri.parse(webhookUrl.trim());
+      final http.Response response = await _client
+          .get(uri)
+          .timeout(const Duration(seconds: 8));
+
+      // Detect HTML/login page
+      if (response.body.contains('<html') ||
+          response.body.contains('<!DOCTYPE') ||
+          response.body.contains('accounts.google.com')) {
+        final String msg = 'Webhook returned HTML/login page. '
+            'Ensure Apps Script is deployed with access "Anyone" and URL ends with /exec.';
+        _setTargetError(target, msg);
+        _pauseTarget(target);
+        return false;
+      }
+
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        _setTargetError(target, 'Preflight failed: HTTP ${response.statusCode}');
+        _pauseTarget(target);
+        return false;
+      }
+
+      // Expect valid JSON with status: "ok"
+      try {
+        final dynamic decoded = jsonDecode(response.body);
+        if (decoded is Map && decoded['status'] == 'ok') {
+          return true;
+        }
+      } catch (_) {}
+
+      _setTargetError(target,
+          'Preflight: webhook responded but not valid JSON health check');
+      _pauseTarget(target);
+      return false;
+    } catch (error) {
+      _setTargetError(target, 'Preflight error: ${_truncateError(error.toString())}');
+      _pauseTarget(target);
+      return false;
+    }
+  }
+
+  void _setTargetError(String target, String msg) {
+    if (target == 'movement') {
+      _movementLastError = msg;
+    } else {
+      _chargingLastError = msg;
+    }
+    _emitStatus();
+  }
+
+  void _pauseTarget(String target) {
+    if (target == 'movement') {
+      _movementPaused = true;
+    } else {
+      _chargingPaused = true;
+    }
+    _emitStatus();
   }
 
   Future<void> enqueueMovement(Map<String, dynamic> payload) async {
@@ -208,6 +280,13 @@ class DriveSyncService {
   }
 
   Future<void> retryMovementNow() async {
+    // Run preflight before retrying
+    if (movementWebhookUrl.trim().isNotEmpty) {
+      final bool healthy = await _preflightCheck(movementWebhookUrl, 'movement');
+      if (!healthy) {
+        return;
+      }
+    }
     for (int i = 0; i < _movementQueue.length; i++) {
       _movementQueue[i] = _movementQueue[i].copyWith(
         nextAttemptUtc: DateTime.now().toUtc(),
@@ -232,6 +311,13 @@ class DriveSyncService {
   }
 
   Future<void> retryChargingNow() async {
+    // Run preflight before retrying
+    if (chargingWebhookUrl.trim().isNotEmpty) {
+      final bool healthy = await _preflightCheck(chargingWebhookUrl, 'charging');
+      if (!healthy) {
+        return;
+      }
+    }
     for (int i = 0; i < _chargingQueue.length; i++) {
       _chargingQueue[i] = _chargingQueue[i].copyWith(
         nextAttemptUtc: DateTime.now().toUtc(),
@@ -256,6 +342,14 @@ class DriveSyncService {
     }
     if (!_initialized) {
       await initialize();
+    }
+
+    // Preflight: verify webhook is reachable before sending data
+    if (movementWebhookUrl.trim().isNotEmpty) {
+      final bool healthy = await _preflightCheck(movementWebhookUrl, 'movement');
+      if (!healthy) {
+        return;
+      }
     }
 
     _movementFlushing = true;
@@ -340,6 +434,14 @@ class DriveSyncService {
       await initialize();
     }
 
+    // Preflight: verify webhook is reachable before sending data
+    if (chargingWebhookUrl.trim().isNotEmpty) {
+      final bool healthy = await _preflightCheck(chargingWebhookUrl, 'charging');
+      if (!healthy) {
+        return;
+      }
+    }
+
     _chargingFlushing = true;
     _emitStatus();
     try {
@@ -415,9 +517,19 @@ class DriveSyncService {
 
       _movementLastError =
           'Movement batch fail (HTTP ${response.statusCode}): ${_truncateError(response.body)}';
+      // Auto-pause if webhook misconfigured (HTML response)
+      if (_isHtmlResponse(response.body)) {
+        _movementPaused = true;
+        _movementLastError = 'Webhook returned HTML. Auto-paused. '
+            'Check deployment (access "Anyone", URL /exec), then Retry.';
+      }
       return 0;
     } catch (error) {
       _movementLastError = 'Movement batch error: ${_truncateError(error.toString())}';
+      // Auto-pause on webhook config errors (HTML detection etc.)
+      if (error.toString().contains('HTML instead of JSON')) {
+        _movementPaused = true;
+      }
       return 0;
     }
   }
@@ -460,9 +572,17 @@ class DriveSyncService {
 
       _chargingLastError =
           'HTTP ${response.statusCode} on charging: ${_truncateError(response.body)}';
+      if (_isHtmlResponse(response.body)) {
+        _chargingPaused = true;
+        _chargingLastError = 'Webhook returned HTML. Auto-paused. '
+            'Check deployment (access "Anyone", URL /exec), then Retry.';
+      }
       return false;
     } catch (error) {
       _chargingLastError = 'Charging error: ${_truncateError(error.toString())}';
+      if (error.toString().contains('HTML instead of JSON')) {
+        _chargingPaused = true;
+      }
       return false;
     }
   }
@@ -584,6 +704,12 @@ class DriveSyncService {
       return '${compact.substring(0, 120)}...';
     }
     return compact;
+  }
+
+  bool _isHtmlResponse(String body) {
+    return body.contains('<html') ||
+        body.contains('<!DOCTYPE') ||
+        body.contains('accounts.google.com');
   }
 
   Future<void> _persistQueue() async {
